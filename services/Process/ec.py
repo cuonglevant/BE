@@ -5,22 +5,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from utils import four_point_transform
 
-
-def _is_gui_available():
-    """Kiem tra kha dung HighGUI (imshow/namedWindow)."""
-    try:
-        cv2.namedWindow("__test__", cv2.WINDOW_NORMAL)
-        cv2.destroyWindow("__test__")
-        return True
-    except Exception:
-        return False
-
-
-GUI_AVAILABLE = _is_gui_available()
-
-
 def process_exam_code(image_path=None, show_images=False, save_images=False):
-    global GUI_AVAILABLE
     """
     Xử lý nhận dạng mã đề từ ảnh exam code
     
@@ -32,6 +17,9 @@ def process_exam_code(image_path=None, show_images=False, save_images=False):
     Returns:
         str: Mã đề được nhận dạng (4 chữ số) hoặc chuỗi rỗng nếu không tìm thấy
     """
+    # Luon tat hien thi GUI
+    show_images = False
+
     # Đọc và xử lý ảnh
     if image_path is None:
         image_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "code.jpg")
@@ -90,7 +78,7 @@ def process_exam_code(image_path=None, show_images=False, save_images=False):
         cv2.imwrite("all_contours_exam_code.jpg", all_contours_image)
         print("Da luu anh tat ca contours vao file 'all_contours_exam_code.jpg'")
     
-    if show_images and GUI_AVAILABLE:
+    if False:
         # Thu nhỏ ảnh để dễ nhìn
         height, width = all_contours_image.shape[:2]
         max_size = 800
@@ -129,13 +117,8 @@ def process_exam_code(image_path=None, show_images=False, save_images=False):
                     print(f"Thu nho: {current_size[2]}x{current_size[3]} -> {new_width}x{new_height}")
             cv2.destroyAllWindows()
         except Exception:
-            global GUI_AVAILABLE
-            GUI_AVAILABLE = False
             cv2.imwrite("all_contours_exam_code.jpg", all_contours_image)
             print("GUI khong kha dung, da luu 'all_contours_exam_code.jpg'")
-    elif show_images and not GUI_AVAILABLE:
-        cv2.imwrite("all_contours_exam_code.jpg", all_contours_image)
-        print("GUI khong kha dung, da luu 'all_contours_exam_code.jpg'")
 
     paper_contour = None
     selected_contour_idx = -1
@@ -167,7 +150,7 @@ def process_exam_code(image_path=None, show_images=False, save_images=False):
         cv2.imwrite("selected_contour_exam_code.jpg", selected_contour_image)
         print("Da luu anh contour duoc chon vao file 'selected_contour_exam_code.jpg'")
     
-    if show_images and GUI_AVAILABLE:
+    if False:
         # Thu nhỏ ảnh để dễ nhìn
         height, width = selected_contour_image.shape[:2]
         max_size = 800
@@ -206,13 +189,8 @@ def process_exam_code(image_path=None, show_images=False, save_images=False):
                     print(f"Thu nho: {current_size[2]}x{current_size[3]} -> {new_width}x{new_height}")
             cv2.destroyAllWindows()
         except Exception:
-            global GUI_AVAILABLE
-            GUI_AVAILABLE = False
             cv2.imwrite("selected_contour_exam_code.jpg", selected_contour_image)
             print("GUI khong kha dung, da luu 'selected_contour_exam_code.jpg'")
-    elif show_images and not GUI_AVAILABLE:
-        cv2.imwrite("selected_contour_exam_code.jpg", selected_contour_image)
-        print("GUI khong kha dung, da luu 'selected_contour_exam_code.jpg'")
     
     try:
         # Crop và xoay ảnh
@@ -273,7 +251,7 @@ def process_exam_code(image_path=None, show_images=False, save_images=False):
             cv2.imwrite("numbered_made.jpg", numbered_image)
             print("Da luu anh co danh so vao file 'numbered_made.jpg'")
         
-        if show_images and numbered_image is not None and GUI_AVAILABLE:
+        if False and numbered_image is not None:
             # Thu nhỏ ảnh để dễ nhìn
             height, width = numbered_image.shape[:2]
             max_size = 800
@@ -312,13 +290,8 @@ def process_exam_code(image_path=None, show_images=False, save_images=False):
                         print(f"Thu nho: {current_size[2]}x{current_size[3]} -> {new_width}x{new_height}")
                 cv2.destroyAllWindows()
             except Exception:
-                global GUI_AVAILABLE
-                GUI_AVAILABLE = False
                 cv2.imwrite("numbered_made.jpg", numbered_image)
                 print("GUI khong kha dung, da luu 'numbered_made.jpg'")
-        elif show_images and numbered_image is not None and not GUI_AVAILABLE:
-            cv2.imwrite("numbered_made.jpg", numbered_image)
-            print("GUI khong kha dung, da luu 'numbered_made.jpg'")
         
         # Kết quả
         if len(exam_code_string) == 4:
@@ -335,7 +308,7 @@ def process_exam_code(image_path=None, show_images=False, save_images=False):
 
 def main():
     """Hàm main để test"""
-    exam_code = process_exam_code(show_images=GUI_AVAILABLE, save_images=True)
+    exam_code = process_exam_code(show_images=False, save_images=True)
     print(f"\nMa de nhan dang duoc: {exam_code}")
 
 

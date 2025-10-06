@@ -6,25 +6,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from utils import four_point_transform
 
 
-def _is_gui_available():
-    """Kiểm tra OpenCV có hỗ trợ GUI (HighGUI) hay không.
-
-    Trên môi trường server/không có GUI hoặc dùng opencv-python-headless,
-    việc tạo window sẽ ném lỗi. Hàm này giúp ta chuyển sang chế độ không hiển thị.
-    """
-    try:
-        cv2.namedWindow("__test__", cv2.WINDOW_NORMAL)
-        cv2.destroyWindow("__test__")
-        return True
-    except Exception:
-        return False
-
-
-GUI_AVAILABLE = _is_gui_available()
-
-
 def process_p1_answers(image_path=None, show_images=False, save_images=False):
-    global GUI_AVAILABLE
     """
     Xử lý nhận dạng đáp án từ ảnh p1
     
@@ -38,6 +20,9 @@ def process_p1_answers(image_path=None, show_images=False, save_images=False):
               Ví dụ: [(1, 'A'), (2, 'B'), (3, ''), (4, 'C'), ...]
               Contour 1: câu 1-10, Contour 2: câu 11-20, Contour 3: câu 21-30, Contour 4: câu 31-40
     """
+    # Luon tat hien thi GUI
+    show_images = False
+
     # Đọc và xử lý ảnh
     if image_path is None:
         image_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "p12.jpg")
@@ -96,56 +81,7 @@ def process_p1_answers(image_path=None, show_images=False, save_images=False):
         cv2.imwrite("all_contours_p1.jpg", all_contours_image)
         print("Da luu anh tat ca contours vao file 'all_contours_p1.jpg'")
     
-    if show_images and GUI_AVAILABLE:
-        try:
-            # Thu nhỏ ảnh để dễ nhìn
-            height, width = all_contours_image.shape[:2]
-            max_size = 800
-            if max(height, width) > max_size:
-                scale = max_size / max(height, width)
-                new_width = int(width * scale)
-                new_height = int(height * scale)
-                all_contours_resized = cv2.resize(all_contours_image, (new_width, new_height))
-                print(f"Thu nho anh tu {width}x{height} xuong {new_width}x{new_height}")
-            else:
-                all_contours_resized = all_contours_image
-            
-            # Hiển thị ảnh với khả năng phóng to
-            cv2.namedWindow("Tat ca contours P1", cv2.WINDOW_NORMAL)
-            cv2.resizeWindow("Tat ca contours P1", all_contours_resized.shape[1], all_contours_resized.shape[0])
-            cv2.imshow("Tat ca contours P1", all_contours_resized)
-            print("Nhan phim ESC de dong, phim + de phong to, phim - de thu nho")
-            while True:
-                key = cv2.waitKey(0) & 0xFF
-                if key == 27:  # ESC
-                    break
-                elif key == ord('+') or key == ord('='):
-                    # Phóng to
-                    current_size = cv2.getWindowImageRect("Tat ca contours P1")
-                    new_width = int(current_size[2] * 1.2)
-                    new_height = int(current_size[3] * 1.2)
-                    cv2.resizeWindow("Tat ca contours P1", new_width, new_height)
-                    print(f"Phong to: {current_size[2]}x{current_size[3]} -> {new_width}x{new_height}")
-                elif key == ord('-'):
-                    # Thu nhỏ
-                    current_size = cv2.getWindowImageRect("Tat ca contours P1")
-                    new_width = int(current_size[2] * 0.8)
-                    new_height = int(current_size[3] * 0.8)
-                    cv2.resizeWindow("Tat ca contours P1", new_width, new_height)
-                    print(f"Thu nho: {current_size[2]}x{current_size[3]} -> {new_width}x{new_height}")
-            cv2.destroyAllWindows()
-        except Exception as _e:
-            # Nếu lỗi HighGUI, tắt GUI cho các lần sau và lưu ảnh thay thế
-            global GUI_AVAILABLE
-            GUI_AVAILABLE = False
-            out_path = "all_contours_p1.jpg"
-            cv2.imwrite(out_path, all_contours_image)
-            print(f"GUI gap loi khi hien thi (da tat), da luu: '{out_path}'")
-    elif show_images and not GUI_AVAILABLE:
-        # Không thể mở cửa sổ hiển thị: lưu ảnh thay thế
-        out_path = "all_contours_p1.jpg"
-        cv2.imwrite(out_path, all_contours_image)
-        print(f"GUI khong kha dung, da luu anh thay cho hien thi: '{out_path}'")
+    # Bo hoan toan hien thi GUI
 
     # Tìm contours đạt yêu cầu (4 góc, diện tích phù hợp)
     qualified_contours = []
@@ -185,7 +121,7 @@ def process_p1_answers(image_path=None, show_images=False, save_images=False):
                 cv2.imwrite(f"selected_contour_p1_{idx + 1}_{original_idx}.jpg", selected_contour_image)
                 print(f"  Da luu anh contour duoc chon vao file 'selected_contour_p1_{idx + 1}_{original_idx}.jpg'")
             
-            if show_images and GUI_AVAILABLE:
+            if False:
                 # Thu nhỏ ảnh để dễ nhìn
                 height, width = selected_contour_image.shape[:2]
                 max_size = 800
@@ -199,42 +135,7 @@ def process_p1_answers(image_path=None, show_images=False, save_images=False):
                     selected_contour_resized = selected_contour_image
                     
                 # Hiển thị ảnh với khả năng phóng to
-                try:
-                    cv2.namedWindow(f"Contour {idx + 1} P1", cv2.WINDOW_NORMAL)
-                    cv2.resizeWindow(f"Contour {idx + 1} P1", selected_contour_resized.shape[1], selected_contour_resized.shape[0])
-                    cv2.imshow(f"Contour {idx + 1} P1", selected_contour_resized)
-                    print(f"  Nhan phim ESC de dong, phim + de phong to, phim - de thu nho")
-                    while True:
-                        key = cv2.waitKey(0) & 0xFF
-                        if key == 27:  # ESC
-                            break
-                        elif key == ord('+') or key == ord('='):
-                            # Phóng to
-                            current_size = cv2.getWindowImageRect(f"Contour {idx + 1} P1")
-                            new_width = int(current_size[2] * 1.2)
-                            new_height = int(current_size[3] * 1.2)
-                            cv2.resizeWindow(f"Contour {idx + 1} P1", new_width, new_height)
-                            print(f"  Phong to: {current_size[2]}x{current_size[3]} -> {new_width}x{new_height}")
-                        elif key == ord('-'):
-                            # Thu nhỏ
-                            current_size = cv2.getWindowImageRect(f"Contour {idx + 1} P1")
-                            new_width = int(current_size[2] * 0.8)
-                            new_height = int(current_size[3] * 0.8)
-                            cv2.resizeWindow(f"Contour {idx + 1} P1", new_width, new_height)
-                            print(f"  Thu nho: {current_size[2]}x{current_size[3]} -> {new_width}x{new_height}")
-                    cv2.destroyAllWindows()
-                except Exception:
-                    # Nếu lỗi GUI, tắt GUI cho các lần sau và lưu ảnh
-                    global GUI_AVAILABLE
-                    GUI_AVAILABLE = False
-                    out_path = f"selected_contour_p1_{idx + 1}_{original_idx}.jpg"
-                    cv2.imwrite(out_path, selected_contour_image)
-                    print(f"  GUI gap loi khi hien thi (da tat), da luu: '{out_path}'")
-            elif show_images and not GUI_AVAILABLE:
-                # Không thể mở cửa sổ hiển thị: lưu ảnh thay thế
-                out_path = f"selected_contour_p1_{idx + 1}_{original_idx}.jpg"
-                cv2.imwrite(out_path, selected_contour_image)
-                print(f"  GUI khong kha dung, da luu anh contour: '{out_path}'")
+                pass
 
             # Crop và xoay ảnh
             paper_points = approx.reshape(4, 2)
@@ -304,21 +205,8 @@ def process_p1_answers(image_path=None, show_images=False, save_images=False):
                 cv2.imwrite(f"numbered_{idx + 1}_{original_idx}.jpg", numbered_image)
                 print(f"Da luu anh co danh so vao file 'numbered_{idx + 1}_{original_idx}.jpg'")
             
-            if show_images and numbered_image is not None and GUI_AVAILABLE:
-                try:
-                    cv2.imshow(f"Vung {idx + 1} co danh so", numbered_image)
-                    cv2.waitKey(0)
-                    cv2.destroyAllWindows()
-                except Exception:
-                    global GUI_AVAILABLE
-                    GUI_AVAILABLE = False
-                    out_path = f"numbered_{idx + 1}_{original_idx}.jpg"
-                    cv2.imwrite(out_path, numbered_image)
-                    print(f"GUI gap loi khi hien thi (da tat), da luu: '{out_path}'")
-            elif show_images and numbered_image is not None and not GUI_AVAILABLE:
-                out_path = f"numbered_{idx + 1}_{original_idx}.jpg"
-                cv2.imwrite(out_path, numbered_image)
-                print(f"Da luu anh co danh so (thay cho hien thi): '{out_path}'")
+            if False and numbered_image is not None:
+                pass
             
             # Kết quả
             if len(ans) > 0:
@@ -372,8 +260,7 @@ def process_p1_answers(image_path=None, show_images=False, save_images=False):
 
 def main():
     """Hàm main để test"""
-    # Nếu không có GUI, tự động tắt hiển thị để tránh lỗi
-    answers = process_p1_answers(show_images=GUI_AVAILABLE, save_images=True)
+    answers = process_p1_answers(show_images=False, save_images=True)
     print(f"\nKet qua cuoi cung: {answers}")
 
 

@@ -5,21 +5,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from utils import four_point_transform
 
-
-def _is_gui_available():
-    try:
-        cv2.namedWindow("__test__", cv2.WINDOW_NORMAL)
-        cv2.destroyWindow("__test__")
-        return True
-    except Exception:
-        return False
-
-
-GUI_AVAILABLE = _is_gui_available()
-
-
 def process_p2_answers(image_path=None, show_images=False, save_images=False):
-    global GUI_AVAILABLE
     """
     Xử lý nhận dạng mã đề từ ảnh p2 (đáp án 5 chữ số)
     
@@ -31,6 +17,9 @@ def process_p2_answers(image_path=None, show_images=False, save_images=False):
     Returns:
         list: Danh sách các mã đề được nhận dạng (mỗi mã đề 5 chữ số)
     """
+    # Luon tat hien thi GUI
+    show_images = False
+
     # Đọc và xử lý ảnh
     if image_path is None:
         image_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "p12.jpg")
@@ -277,19 +266,8 @@ def process_p2_answers(image_path=None, show_images=False, save_images=False):
                     cv2.imwrite(f"numbered_{idx + 1}_{original_idx}_{part_name.lower()}.jpg", numbered_image)
                     print(f"    Da luu anh phan {part_name} vao file 'numbered_{idx + 1}_{original_idx}_{part_name.lower()}.jpg'")
                 
-                if show_images and numbered_image is not None and GUI_AVAILABLE:
-                    try:
-                        cv2.imshow(f"Phan {part_name} - Vung {idx + 1}", numbered_image)
-                        cv2.waitKey(0)
-                        cv2.destroyAllWindows()
-                    except Exception:
-                        global GUI_AVAILABLE
-                        GUI_AVAILABLE = False
-                        cv2.imwrite(f"numbered_{idx + 1}_{original_idx}_{part_name.lower()}.jpg", numbered_image)
-                        print(f"    GUI khong kha dung, da luu 'numbered_{idx + 1}_{original_idx}_{part_name.lower()}.jpg'")
-                elif show_images and numbered_image is not None and not GUI_AVAILABLE:
-                    cv2.imwrite(f"numbered_{idx + 1}_{original_idx}_{part_name.lower()}.jpg", numbered_image)
-                    print(f"    GUI khong kha dung, da luu 'numbered_{idx + 1}_{original_idx}_{part_name.lower()}.jpg'")
+                if False and numbered_image is not None:
+                    pass
                 
                 print(f"    Ket qua phan {part_name}: {part_string} ✓ ({len(part_string)} chu so)")
                 print(f"    Cac o da to phan {part_name}:", ans)
@@ -322,7 +300,7 @@ def process_p2_answers(image_path=None, show_images=False, save_images=False):
 
 def main():
     """Hàm main để test"""
-    answers = process_p2_answers(show_images=GUI_AVAILABLE, save_images=True)
+    answers = process_p2_answers(show_images=False, save_images=True)
     print(f"\nKet qua cuoi cung: {answers}")
 
 
