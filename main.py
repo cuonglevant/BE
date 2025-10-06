@@ -16,6 +16,7 @@ from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
+from flask_swagger_ui import get_swaggerui_blueprint
 
 # Load environment variables
 load_dotenv()
@@ -23,6 +24,18 @@ load_dotenv()
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app, supports_credentials=True)
+
+# Swagger UI configuration
+SWAGGER_URL = '/docs'
+API_URL = '/static/swagger.json'
+swaggerui_blueprint = get_swaggerui_blueprint(
+    SWAGGER_URL,
+    API_URL,
+    config={
+        'app_name': "Exam Grading API"
+    }
+)
+app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
 
 # Setup logging
 logging.basicConfig(
