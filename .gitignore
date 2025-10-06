@@ -1,0 +1,43 @@
+# Python
+*__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# Jupyter
+*.ipynb_checkpoints/
+
+# Environment
+.env
+.venv/
+venv/
+ENV/
+
+# VSCode
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test files
+# Ignore test scripts and outputs
+/test_api.py
+/QUICKSTART.md
+/SUMMARY.md
+
+# Ignore images and temp files
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.tmp
+*.bak
+*.swp
+
+# Ignore deployment configs (optional)
+# render.yaml
