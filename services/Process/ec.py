@@ -6,6 +6,19 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from utils import four_point_transform
 
 
+def _is_gui_available():
+    """Kiem tra kha dung HighGUI (imshow/namedWindow)."""
+    try:
+        cv2.namedWindow("__test__", cv2.WINDOW_NORMAL)
+        cv2.destroyWindow("__test__")
+        return True
+    except Exception:
+        return False
+
+
+GUI_AVAILABLE = _is_gui_available()
+
+
 def process_exam_code(image_path=None, show_images=False, save_images=False):
     """
     Xử lý nhận dạng mã đề từ ảnh exam code
@@ -76,7 +89,7 @@ def process_exam_code(image_path=None, show_images=False, save_images=False):
         cv2.imwrite("all_contours_exam_code.jpg", all_contours_image)
         print("Da luu anh tat ca contours vao file 'all_contours_exam_code.jpg'")
     
-    if show_images:
+    if show_images and GUI_AVAILABLE:
         # Thu nhỏ ảnh để dễ nhìn
         height, width = all_contours_image.shape[:2]
         max_size = 800
@@ -90,29 +103,38 @@ def process_exam_code(image_path=None, show_images=False, save_images=False):
             all_contours_resized = all_contours_image
             
         # Hiển thị ảnh với khả năng phóng to
-        cv2.namedWindow("Tat ca contours", cv2.WINDOW_NORMAL)
-        cv2.resizeWindow("Tat ca contours", all_contours_resized.shape[1], all_contours_resized.shape[0])
-        cv2.imshow("Tat ca contours", all_contours_resized)
-        print("Nhan phim ESC de dong, phim + de phong to, phim - de thu nho")
-        while True:
-            key = cv2.waitKey(0) & 0xFF
-            if key == 27:  # ESC
-                break
-            elif key == ord('+') or key == ord('='):
-                # Phóng to
-                current_size = cv2.getWindowImageRect("Tat ca contours")
-                new_width = int(current_size[2] * 1.2)
-                new_height = int(current_size[3] * 1.2)
-                cv2.resizeWindow("Tat ca contours", new_width, new_height)
-                print(f"Phong to: {current_size[2]}x{current_size[3]} -> {new_width}x{new_height}")
-            elif key == ord('-'):
-                # Thu nhỏ
-                current_size = cv2.getWindowImageRect("Tat ca contours")
-                new_width = int(current_size[2] * 0.8)
-                new_height = int(current_size[3] * 0.8)
-                cv2.resizeWindow("Tat ca contours", new_width, new_height)
-                print(f"Thu nho: {current_size[2]}x{current_size[3]} -> {new_width}x{new_height}")
-        cv2.destroyAllWindows()
+        try:
+            cv2.namedWindow("Tat ca contours", cv2.WINDOW_NORMAL)
+            cv2.resizeWindow("Tat ca contours", all_contours_resized.shape[1], all_contours_resized.shape[0])
+            cv2.imshow("Tat ca contours", all_contours_resized)
+            print("Nhan phim ESC de dong, phim + de phong to, phim - de thu nho")
+            while True:
+                key = cv2.waitKey(0) & 0xFF
+                if key == 27:  # ESC
+                    break
+                elif key == ord('+') or key == ord('='):
+                    # Phóng to
+                    current_size = cv2.getWindowImageRect("Tat ca contours")
+                    new_width = int(current_size[2] * 1.2)
+                    new_height = int(current_size[3] * 1.2)
+                    cv2.resizeWindow("Tat ca contours", new_width, new_height)
+                    print(f"Phong to: {current_size[2]}x{current_size[3]} -> {new_width}x{new_height}")
+                elif key == ord('-'):
+                    # Thu nhỏ
+                    current_size = cv2.getWindowImageRect("Tat ca contours")
+                    new_width = int(current_size[2] * 0.8)
+                    new_height = int(current_size[3] * 0.8)
+                    cv2.resizeWindow("Tat ca contours", new_width, new_height)
+                    print(f"Thu nho: {current_size[2]}x{current_size[3]} -> {new_width}x{new_height}")
+            cv2.destroyAllWindows()
+        except Exception:
+            global GUI_AVAILABLE
+            GUI_AVAILABLE = False
+            cv2.imwrite("all_contours_exam_code.jpg", all_contours_image)
+            print("GUI khong kha dung, da luu 'all_contours_exam_code.jpg'")
+    elif show_images and not GUI_AVAILABLE:
+        cv2.imwrite("all_contours_exam_code.jpg", all_contours_image)
+        print("GUI khong kha dung, da luu 'all_contours_exam_code.jpg'")
 
     paper_contour = None
     selected_contour_idx = -1
@@ -144,7 +166,7 @@ def process_exam_code(image_path=None, show_images=False, save_images=False):
         cv2.imwrite("selected_contour_exam_code.jpg", selected_contour_image)
         print("Da luu anh contour duoc chon vao file 'selected_contour_exam_code.jpg'")
     
-    if show_images:
+    if show_images and GUI_AVAILABLE:
         # Thu nhỏ ảnh để dễ nhìn
         height, width = selected_contour_image.shape[:2]
         max_size = 800
@@ -158,29 +180,38 @@ def process_exam_code(image_path=None, show_images=False, save_images=False):
             selected_contour_resized = selected_contour_image
             
         # Hiển thị ảnh với khả năng phóng to
-        cv2.namedWindow("Contour duoc chon", cv2.WINDOW_NORMAL)
-        cv2.resizeWindow("Contour duoc chon", selected_contour_resized.shape[1], selected_contour_resized.shape[0])
-        cv2.imshow("Contour duoc chon", selected_contour_resized)
-        print("Nhan phim ESC de dong, phim + de phong to, phim - de thu nho")
-        while True:
-            key = cv2.waitKey(0) & 0xFF
-            if key == 27:  # ESC
-                break
-            elif key == ord('+') or key == ord('='):
-                # Phóng to
-                current_size = cv2.getWindowImageRect("Contour duoc chon")
-                new_width = int(current_size[2] * 1.2)
-                new_height = int(current_size[3] * 1.2)
-                cv2.resizeWindow("Contour duoc chon", new_width, new_height)
-                print(f"Phong to: {current_size[2]}x{current_size[3]} -> {new_width}x{new_height}")
-            elif key == ord('-'):
-                # Thu nhỏ
-                current_size = cv2.getWindowImageRect("Contour duoc chon")
-                new_width = int(current_size[2] * 0.8)
-                new_height = int(current_size[3] * 0.8)
-                cv2.resizeWindow("Contour duoc chon", new_width, new_height)
-                print(f"Thu nho: {current_size[2]}x{current_size[3]} -> {new_width}x{new_height}")
-        cv2.destroyAllWindows()
+        try:
+            cv2.namedWindow("Contour duoc chon", cv2.WINDOW_NORMAL)
+            cv2.resizeWindow("Contour duoc chon", selected_contour_resized.shape[1], selected_contour_resized.shape[0])
+            cv2.imshow("Contour duoc chon", selected_contour_resized)
+            print("Nhan phim ESC de dong, phim + de phong to, phim - de thu nho")
+            while True:
+                key = cv2.waitKey(0) & 0xFF
+                if key == 27:  # ESC
+                    break
+                elif key == ord('+') or key == ord('='):
+                    # Phóng to
+                    current_size = cv2.getWindowImageRect("Contour duoc chon")
+                    new_width = int(current_size[2] * 1.2)
+                    new_height = int(current_size[3] * 1.2)
+                    cv2.resizeWindow("Contour duoc chon", new_width, new_height)
+                    print(f"Phong to: {current_size[2]}x{current_size[3]} -> {new_width}x{new_height}")
+                elif key == ord('-'):
+                    # Thu nhỏ
+                    current_size = cv2.getWindowImageRect("Contour duoc chon")
+                    new_width = int(current_size[2] * 0.8)
+                    new_height = int(current_size[3] * 0.8)
+                    cv2.resizeWindow("Contour duoc chon", new_width, new_height)
+                    print(f"Thu nho: {current_size[2]}x{current_size[3]} -> {new_width}x{new_height}")
+            cv2.destroyAllWindows()
+        except Exception:
+            global GUI_AVAILABLE
+            GUI_AVAILABLE = False
+            cv2.imwrite("selected_contour_exam_code.jpg", selected_contour_image)
+            print("GUI khong kha dung, da luu 'selected_contour_exam_code.jpg'")
+    elif show_images and not GUI_AVAILABLE:
+        cv2.imwrite("selected_contour_exam_code.jpg", selected_contour_image)
+        print("GUI khong kha dung, da luu 'selected_contour_exam_code.jpg'")
     
     try:
         # Crop và xoay ảnh
@@ -241,7 +272,7 @@ def process_exam_code(image_path=None, show_images=False, save_images=False):
             cv2.imwrite("numbered_made.jpg", numbered_image)
             print("Da luu anh co danh so vao file 'numbered_made.jpg'")
         
-        if show_images and numbered_image is not None:
+        if show_images and numbered_image is not None and GUI_AVAILABLE:
             # Thu nhỏ ảnh để dễ nhìn
             height, width = numbered_image.shape[:2]
             max_size = 800
@@ -255,29 +286,38 @@ def process_exam_code(image_path=None, show_images=False, save_images=False):
                 numbered_resized = numbered_image
                 
             # Hiển thị ảnh với khả năng phóng to
-            cv2.namedWindow("Ma de co danh so", cv2.WINDOW_NORMAL)
-            cv2.resizeWindow("Ma de co danh so", numbered_resized.shape[1], numbered_resized.shape[0])
-            cv2.imshow("Ma de co danh so", numbered_resized)
-            print("Nhan phim ESC de dong, phim + de phong to, phim - de thu nho")
-            while True:
-                key = cv2.waitKey(0) & 0xFF
-                if key == 27:  # ESC
-                    break
-                elif key == ord('+') or key == ord('='):
-                    # Phóng to
-                    current_size = cv2.getWindowImageRect("Ma de co danh so")
-                    new_width = int(current_size[2] * 1.2)
-                    new_height = int(current_size[3] * 1.2)
-                    cv2.resizeWindow("Ma de co danh so", new_width, new_height)
-                    print(f"Phong to: {current_size[2]}x{current_size[3]} -> {new_width}x{new_height}")
-                elif key == ord('-'):
-                    # Thu nhỏ
-                    current_size = cv2.getWindowImageRect("Ma de co danh so")
-                    new_width = int(current_size[2] * 0.8)
-                    new_height = int(current_size[3] * 0.8)
-                    cv2.resizeWindow("Ma de co danh so", new_width, new_height)
-                    print(f"Thu nho: {current_size[2]}x{current_size[3]} -> {new_width}x{new_height}")
-            cv2.destroyAllWindows()
+            try:
+                cv2.namedWindow("Ma de co danh so", cv2.WINDOW_NORMAL)
+                cv2.resizeWindow("Ma de co danh so", numbered_resized.shape[1], numbered_resized.shape[0])
+                cv2.imshow("Ma de co danh so", numbered_resized)
+                print("Nhan phim ESC de dong, phim + de phong to, phim - de thu nho")
+                while True:
+                    key = cv2.waitKey(0) & 0xFF
+                    if key == 27:  # ESC
+                        break
+                    elif key == ord('+') or key == ord('='):
+                        # Phóng to
+                        current_size = cv2.getWindowImageRect("Ma de co danh so")
+                        new_width = int(current_size[2] * 1.2)
+                        new_height = int(current_size[3] * 1.2)
+                        cv2.resizeWindow("Ma de co danh so", new_width, new_height)
+                        print(f"Phong to: {current_size[2]}x{current_size[3]} -> {new_width}x{new_height}")
+                    elif key == ord('-'):
+                        # Thu nhỏ
+                        current_size = cv2.getWindowImageRect("Ma de co danh so")
+                        new_width = int(current_size[2] * 0.8)
+                        new_height = int(current_size[3] * 0.8)
+                        cv2.resizeWindow("Ma de co danh so", new_width, new_height)
+                        print(f"Thu nho: {current_size[2]}x{current_size[3]} -> {new_width}x{new_height}")
+                cv2.destroyAllWindows()
+            except Exception:
+                global GUI_AVAILABLE
+                GUI_AVAILABLE = False
+                cv2.imwrite("numbered_made.jpg", numbered_image)
+                print("GUI khong kha dung, da luu 'numbered_made.jpg'")
+        elif show_images and numbered_image is not None and not GUI_AVAILABLE:
+            cv2.imwrite("numbered_made.jpg", numbered_image)
+            print("GUI khong kha dung, da luu 'numbered_made.jpg'")
         
         # Kết quả
         if len(exam_code_string) == 4:
@@ -294,7 +334,7 @@ def process_exam_code(image_path=None, show_images=False, save_images=False):
 
 def main():
     """Hàm main để test"""
-    exam_code = process_exam_code(show_images=True, save_images=True)
+    exam_code = process_exam_code(show_images=GUI_AVAILABLE, save_images=True)
     print(f"\nMa de nhan dang duoc: {exam_code}")
 
 

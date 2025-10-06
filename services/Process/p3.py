@@ -8,6 +8,18 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from utils import find_corner_by_rotated_rect, four_point_transform, sort_contours
 
 
+def _is_gui_available():
+    try:
+        cv2.namedWindow("__test__", cv2.WINDOW_NORMAL)
+        cv2.destroyWindow("__test__")
+        return True
+    except Exception:
+        return False
+
+
+GUI_AVAILABLE = _is_gui_available()
+
+
 def process_p3_answers(image_path=None, show_images=False, save_images=False):
     """
     Xử lý nhận dạng đáp án từ ảnh p3 (đáp án 10 chữ số)
@@ -318,10 +330,19 @@ def process_p3_answers(image_path=None, show_images=False, save_images=False):
                     detected_answers.append(contour_string)  # Vẫn thêm vào dù không đủ 10 số
                 
                 # Hien thi anh co danh so thay vi anh crop
-                if show_images:
-                    cv2.imshow(f"Vung {idx + 1} co danh so", numbered_image)
-                    cv2.waitKey(0)
-                    cv2.destroyAllWindows()
+                if show_images and GUI_AVAILABLE:
+                    try:
+                        cv2.imshow(f"Vung {idx + 1} co danh so", numbered_image)
+                        cv2.waitKey(0)
+                        cv2.destroyAllWindows()
+                    except Exception:
+                        global GUI_AVAILABLE
+                        GUI_AVAILABLE = False
+                        cv2.imwrite(f"numbered_p3_{idx + 1}_{original_idx}.jpg", numbered_image)
+                        print(f"GUI khong kha dung, da luu 'numbered_p3_{idx + 1}_{original_idx}.jpg'")
+                elif show_images and not GUI_AVAILABLE:
+                    cv2.imwrite(f"numbered_p3_{idx + 1}_{original_idx}.jpg", numbered_image)
+                    print(f"GUI khong kha dung, da luu 'numbered_p3_{idx + 1}_{original_idx}.jpg'")
                 
             except Exception as e:
                 print(f"Loi khi xu ly contour {idx + 1}: {e}")
@@ -335,7 +356,7 @@ def process_p3_answers(image_path=None, show_images=False, save_images=False):
 
 def main():
     """Hàm main để test"""
-    answers = process_p3_answers(show_images=True, save_images=True)
+    answers = process_p3_answers(show_images=GUI_AVAILABLE, save_images=True)
     print(f"\nKet qua cuoi cung: {answers}")
 
 
