@@ -26,7 +26,6 @@ Thumbs.db
 
 # Test files
 # Ignore test scripts and outputs
-/test_api.py
 /QUICKSTART.md
 /SUMMARY.md
 
