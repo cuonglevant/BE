@@ -20,6 +20,7 @@ GUI_AVAILABLE = _is_gui_available()
 
 
 def process_exam_code(image_path=None, show_images=False, save_images=False):
+    global GUI_AVAILABLE
     """
     Xử lý nhận dạng mã đề từ ảnh exam code
     

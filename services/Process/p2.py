@@ -19,6 +19,7 @@ GUI_AVAILABLE = _is_gui_available()
 
 
 def process_p2_answers(image_path=None, show_images=False, save_images=False):
+    global GUI_AVAILABLE
     """
     Xử lý nhận dạng mã đề từ ảnh p2 (đáp án 5 chữ số)
     

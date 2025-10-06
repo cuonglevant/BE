@@ -21,6 +21,7 @@ GUI_AVAILABLE = _is_gui_available()
 
 
 def process_p3_answers(image_path=None, show_images=False, save_images=False):
+    global GUI_AVAILABLE
     """
     Xử lý nhận dạng đáp án từ ảnh p3 (đáp án 10 chữ số)
     
