@@ -1,0 +1,359 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Exam Grading API",
+    "description": "A complete backend system for scanning and grading multiple-choice exams with automatic scoring.",
+    "version": "1.0.0"
+  },
+  "host": "localhost:5000",
+  "basePath": "/",
+  "schemes": ["http"],
+  "consumes": ["application/json"],
+  "produces": ["application/json"],
+  "paths": {
+    "/": {
+      "get": {
+        "summary": "API Root",
+        "description": "Get API information and available endpoints",
+        "responses": {
+          "200": {
+            "description": "API information",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "name": {"type": "string"},
+                "version": {"type": "string"},
+                "endpoints": {"type": "object"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health Check",
+        "description": "Check system health and service status",
+        "responses": {
+          "200": {
+            "description": "Health status",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "status": {"type": "string"},
+                "services": {"type": "object"},
+                "metrics": {"type": "object"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/signup": {
+      "post": {
+        "summary": "User Signup",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "email": {"type": "string"},
+                "password": {"type": "string"}
+              },
+              "required": ["email", "password"]
+            }
+          }
+        ],
+        "responses": {
+          "201": {"description": "User created"},
+          "400": {"description": "Invalid data"}
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "summary": "User Login",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "email": {"type": "string"},
+                "password": {"type": "string"}
+              },
+              "required": ["email", "password"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {"description": "Login successful"},
+          "401": {"description": "Invalid credentials"}
+        }
+      }
+    },
+    "/exams": {
+      "get": {
+        "summary": "List Exams",
+        "parameters": [
+          {"name": "student_id", "in": "query", "type": "string"},
+          {"name": "exam_code", "in": "query", "type": "string"}
+        ],
+        "responses": {
+          "200": {
+            "description": "List of exams",
+            "schema": {
+              "type": "array",
+              "items": {"type": "object"}
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Exam",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "student_id": {"type": "string"},
+                "exam_code": {"type": "string"},
+                "total_score": {"type": "number"}
+              },
+              "required": ["student_id", "exam_code"]
+            }
+          }
+        ],
+        "responses": {
+          "201": {"description": "Exam created"},
+          "400": {"description": "Invalid data"}
+        }
+      }
+    },
+    "/exams/{exam_id}": {
+      "get": {
+        "summary": "Get Exam",
+        "parameters": [
+          {"name": "exam_id", "in": "path", "required": true, "type": "string"}
+        ],
+        "responses": {
+          "200": {"description": "Exam details"},
+          "404": {"description": "Exam not found"}
+        }
+      },
+      "put": {
+        "summary": "Update Exam",
+        "parameters": [
+          {"name": "exam_id", "in": "path", "required": true, "type": "string"},
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {"type": "object"}
+          }
+        ],
+        "responses": {
+          "200": {"description": "Exam updated"},
+          "404": {"description": "Exam not found"}
+        }
+      },
+      "delete": {
+        "summary": "Delete Exam",
+        "parameters": [
+          {"name": "exam_id", "in": "path", "required": true, "type": "string"}
+        ],
+        "responses": {
+          "200": {"description": "Exam deleted"},
+          "404": {"description": "Exam not found"}
+        }
+      }
+    },
+    "/correctans": {
+      "get": {
+        "summary": "List Correct Answers",
+        "responses": {
+          "200": {
+            "description": "List of correct answer sets",
+            "schema": {
+              "type": "array",
+              "items": {"type": "object"}
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Correct Answers",
+        "consumes": ["multipart/form-data"],
+        "parameters": [
+          {"name": "exam_code", "in": "formData", "type": "string"},
+          {"name": "p1_img", "in": "formData", "type": "file"},
+          {"name": "p2_img", "in": "formData", "type": "file"},
+          {"name": "p3_img", "in": "formData", "type": "file"}
+        ],
+        "responses": {
+          "201": {"description": "Correct answers created"},
+          "400": {"description": "Missing files"}
+        }
+      }
+    },
+    "/correctans/{exam_code}": {
+      "get": {
+        "summary": "Get Correct Answers",
+        "parameters": [
+          {"name": "exam_code", "in": "path", "required": true, "type": "string"}
+        ],
+        "responses": {
+          "200": {"description": "Correct answers"},
+          "404": {"description": "Not found"}
+        }
+      },
+      "put": {
+        "summary": "Update Correct Answers",
+        "parameters": [
+          {"name": "exam_code", "in": "path", "required": true, "type": "string"},
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "answers": {"type": "array"}
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {"description": "Updated"},
+          "404": {"description": "Not found"}
+        }
+      },
+      "delete": {
+        "summary": "Delete Correct Answers",
+        "parameters": [
+          {"name": "exam_code", "in": "path", "required": true, "type": "string"}
+        ],
+        "responses": {
+          "200": {"description": "Deleted"},
+          "404": {"description": "Not found"}
+        }
+      }
+    },
+    "/exam/session/start": {
+      "post": {
+        "summary": "Start Exam Session",
+        "responses": {
+          "201": {
+            "description": "Session started",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "session_id": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/exam/session/student_id": {
+      "post": {
+        "summary": "Upload Student ID",
+        "consumes": ["multipart/form-data"],
+        "parameters": [
+          {"name": "session_id", "in": "formData", "type": "string"},
+          {"name": "image", "in": "formData", "type": "file"}
+        ],
+        "responses": {
+          "200": {"description": "Student ID scanned"},
+          "400": {"description": "Invalid session or missing image"}
+        }
+      }
+    },
+    "/exam/session/exam_code": {
+      "post": {
+        "summary": "Upload Exam Code",
+        "consumes": ["multipart/form-data"],
+        "parameters": [
+          {"name": "session_id", "in": "formData", "type": "string"},
+          {"name": "image", "in": "formData", "type": "file"}
+        ],
+        "responses": {
+          "200": {"description": "Exam code scanned"},
+          "400": {"description": "Invalid session or missing image"}
+        }
+      }
+    },
+    "/exam/session/part/{part_name}": {
+      "post": {
+        "summary": "Upload Exam Part",
+        "consumes": ["multipart/form-data"],
+        "parameters": [
+          {"name": "part_name", "in": "path", "required": true, "type": "string", "enum": ["p1", "p2", "p3"]},
+          {"name": "session_id", "in": "formData", "type": "string"},
+          {"name": "image", "in": "formData", "type": "file"}
+        ],
+        "responses": {
+          "200": {"description": "Part uploaded"},
+          "400": {"description": "Invalid part or session"}
+        }
+      }
+    },
+    "/exam/session/finish": {
+      "post": {
+        "summary": "Finish Exam Session",
+        "parameters": [
+          {"name": "session_id", "in": "formData", "type": "string"},
+          {"name": "created_by", "in": "formData", "type": "string"}
+        ],
+        "responses": {
+          "201": {"description": "Exam graded and saved"},
+          "400": {"description": "Invalid session or missing data"}
+        }
+      }
+    },
+    "/scan/student_id": {
+      "post": {
+        "summary": "Direct Student ID Scan",
+        "consumes": ["multipart/form-data"],
+        "parameters": [
+          {"name": "image", "in": "formData", "type": "file"}
+        ],
+        "responses": {
+          "200": {"description": "Student ID result"}
+        }
+      }
+    },
+    "/scan/exam_code": {
+      "post": {
+        "summary": "Direct Exam Code Scan",
+        "consumes": ["multipart/form-data"],
+        "parameters": [
+          {"name": "image", "in": "formData", "type": "file"}
+        ],
+        "responses": {
+          "200": {"description": "Exam code result"}
+        }
+      }
+    },
+    "/scan/answers": {
+      "post": {
+        "summary": "Direct Answer Scan",
+        "consumes": ["multipart/form-data"],
+        "parameters": [
+          {"name": "p1_img", "in": "formData", "type": "file"},
+          {"name": "p2_img", "in": "formData", "type": "file"},
+          {"name": "p3_img", "in": "formData", "type": "file"}
+        ],
+        "responses": {
+          "200": {"description": "Scanned answers"}
+        }
+      }
+    }
+  }
+}
