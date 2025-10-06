@@ -1,117 +1,87 @@
-
-from flask import Flask, request, jsonify, g
-from flask_cors import CORS
+"""
+Backend API for Exam Grading System
+Handles exam scanning, grading, and CRUD operations
+"""
+import os
+import uuid
 import tempfile
-from werkzeug.utils import secure_filename
-import redis
 import logging
 import time
 import atexit
 import shutil
-import os
 from datetime import datetime, timedelta
 from functools import lru_cache
 
+from flask import Flask, request, jsonify, g
+from flask_cors import CORS
+from werkzeug.utils import secure_filename
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Initialize Flask app
 app = Flask(__name__)
 CORS(app, supports_credentials=True)
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-# Redis client (fallback to in-memory if Redis not available)
+# Import models and services
+from Models.exam import Exam
+from Models.correctans import CorrectAns
+from services.Auth.auth_service import AuthService
+from services.Db.exam_db_service import ExamDbService
+from services.Db.correctans_db_service import CorrectAnsDbService
+from services.Grade.create_ans import score_answers, scan_all_answers
+from services.Grade.scan_student_id import (
+    scan_student_id, scan_exam_code, scan_p1, scan_p2, scan_p3
+)
+
+# Redis setup (optional)
 try:
-    redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
+    import redis
+    redis_client = redis.Redis(
+        host='localhost', port=6379, decode_responses=True
+    )
     redis_client.ping()
     USE_REDIS = True
     logger.info("Redis connected successfully")
-except:
+except Exception:
     redis_client = None
     USE_REDIS = False
     logger.warning("Redis not available, using in-memory session storage")
+    scan_sessions = {}
 
-from services.Grade.create_ans import score_answers, scan_all_answers
-from Models.correctans import CorrectAns
 
-# Error messages constants
-INVALID_SESSION_MSG = 'Invalid session_id'
-NO_IMAGE_MSG = 'No image uploaded'
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
 
-# Helper functions
 def get_session_temp_dir(session_id):
     """Create and return temp directory for session"""
-    temp_dir = os.path.join(tempfile.gettempdir(), f"exam_session_{session_id}")
+    temp_dir = os.path.join(tempfile.gettempdir(), f"exam_{session_id}")
     os.makedirs(temp_dir, exist_ok=True)
     return temp_dir
 
+
 def cleanup_temp_files():
-    """Cleanup all temp session directories"""
+    """Cleanup all temporary session directories"""
     temp_root = tempfile.gettempdir()
     for dir_name in os.listdir(temp_root):
-        if dir_name.startswith("exam_session_"):
-            shutil.rmtree(os.path.join(temp_root, dir_name), ignore_errors=True)
-            logger.info(f"Cleaned up temp directory: {dir_name}")
+        if dir_name.startswith("exam_"):
+            dir_path = os.path.join(temp_root, dir_name)
+            shutil.rmtree(dir_path, ignore_errors=True)
+            logger.info(f"Cleaned up: {dir_name}")
 
-# Register cleanup on exit
+
 atexit.register(cleanup_temp_files)
 
-def initialize_db_indexes():
-	"""Create MongoDB indexes for better performance"""
-	try:
-		from pymongo import MongoClient
-		import os
-		MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
-		client = MongoClient(MONGO_URI)
-		db = client['be_db']
-		
-		# Create indexes
-		correctans_collection = db['correctans']
-		correctans_collection.create_index("id")  # For exam_code lookup
-		
-		exams_collection = db['exams']
-		exams_collection.create_index([("student_id", 1), ("exam_code", 1)])
-		exams_collection.create_index("created_at")
-		exams_collection.create_index("created_by")
-		
-		logger.info("MongoDB indexes created successfully")
-	except Exception as e:
-		logger.error(f"Error creating indexes: {e}")
 
-def validate_scan_result(scan_type, result):
-    """Validate scan results"""
-    if scan_type == 'student_id':
-        # SBD must be 8 digits
-        return result and len(result) == 8 and result.isdigit()
-    elif scan_type == 'exam_code':
-        # Exam code must be 4 digits
-        return result and len(result) == 4 and result.isdigit()
-    elif scan_type in ['p1', 'p2', 'p3']:
-        # Score must be 0-10
-        try:
-            score = float(result)
-            return 0 <= score <= 10
-        except:
-            return False
-    return False
-
-@lru_cache(maxsize=100)
-def get_correct_answers_by_exam_code_cached(exam_code):
-    """Cache correct answers by exam_code to reduce DB queries"""
-    try:
-        from pymongo import MongoClient
-        import os
-        MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
-        client = MongoClient(MONGO_URI)
-        db = client['be_db']
-        correctans_collection = db['correctans']
-        correct_data = correctans_collection.find_one({'id': str(exam_code)})
-        if correct_data:
-            return CorrectAns(correct_data['id'], correct_data['answers'])
-    except Exception as e:
-        logger.error(f"Error fetching correct answers: {e}")
-    return None
-
-# Session management functions
 def get_session_data(session_id):
     """Get session data from Redis or memory"""
     if USE_REDIS:
@@ -120,530 +90,654 @@ def get_session_data(session_id):
     else:
         return scan_sessions.get(session_id)
 
+
 def set_session_data(session_id, key, value):
     """Set session data in Redis or memory"""
     if USE_REDIS:
-        redis_client.hset(f"session:{session_id}", key, value)
-        redis_client.expire(f"session:{session_id}", timedelta(minutes=30))
+        redis_client.hset(f"session:{session_id}", key, str(value))
+        redis_client.expire(f"session:{session_id}", 1800)  # 30 minutes
     else:
         if session_id not in scan_sessions:
             scan_sessions[session_id] = {}
-        scan_sessions[session_id][key] = value
+        scan_sessions[session_id][key] = str(value)
+
 
 def delete_session(session_id):
-    """Delete session from Redis or memory"""
+    """Delete session and cleanup temp files"""
     if USE_REDIS:
         redis_client.delete(f"session:{session_id}")
     else:
         scan_sessions.pop(session_id, None)
     
-    # Cleanup temp directory
     temp_dir = get_session_temp_dir(session_id)
     if os.path.exists(temp_dir):
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-# Request logging middleware
+
+def save_uploaded_file(file, session_id, prefix):
+    """Save uploaded file to temp directory"""
+    filename = secure_filename(file.filename)
+    temp_dir = get_session_temp_dir(session_id)
+    filepath = os.path.join(temp_dir, f"{prefix}_{filename}")
+    file.save(filepath)
+    return filepath
+
+
+@lru_cache(maxsize=100)
+def get_cached_correct_answers(exam_code):
+    """Get correct answers with caching"""
+    return CorrectAnsDbService.get_correct_ans_by_exam_code(exam_code)
+
+
+# ============================================================================
+# MIDDLEWARE
+# ============================================================================
+
 @app.before_request
 def before_request():
+    """Log incoming requests"""
     g.start_time = time.time()
-    logger.info(f"Request: {request.method} {request.path} from {request.remote_addr}")
+    logger.info(f"→ {request.method} {request.path} from {request.remote_addr}")
+
 
 @app.after_request
 def after_request(response):
+    """Log response time"""
     if hasattr(g, 'start_time'):
         elapsed = time.time() - g.start_time
-        logger.info(f"Response: {response.status} - {elapsed:.3f}s")
+        logger.info(f"← {response.status_code} - {elapsed:.3f}s")
     return response
 
-# Endpoint chấm điểm đáp án
-@app.route('/exam/score', methods=['POST'])
-def score_exam():
-	data = request.get_json()
-	scanned_ans = data.get('scanned_ans')  # [(câu, đáp án), ...]
-	correct_ans = data.get('correct_ans')  # [(câu, đáp án), ...]
-	if not scanned_ans or not correct_ans:
-		return jsonify({'error': 'Missing answers'}), 400
-	score = score_answers(scanned_ans, correct_ans)
-	return jsonify({'score': score})
-import uuid
 
-# Lưu tạm dữ liệu từng session
-scan_sessions = {}
+# ============================================================================
+# AUTHENTICATION ENDPOINTS
+# ============================================================================
 
-@app.route('/exam/start', methods=['POST'])
-def start_exam_session():
-	session_id = str(uuid.uuid4())
-	if USE_REDIS:
-		# Store in Redis with TTL
-		redis_client.hset(f"session:{session_id}", mapping={
-			"created_at": datetime.now().isoformat(),
-			"status": "started"
-		})
-		redis_client.expire(f"session:{session_id}", timedelta(minutes=30))
-	else:
-		# Fallback to memory
-		scan_sessions[session_id] = {
-			"created_at": datetime.now().isoformat(),
-			"status": "started"
-		}
-	logger.info(f"Started exam session: {session_id}")
-	return jsonify({'session_id': session_id})
-
-@app.route('/exam/student_id', methods=['POST'])
-def receive_student_id():
-	session_id = request.form.get('session_id')
-	session_data = get_session_data(session_id)
-	if not session_id or not session_data:
-		return jsonify({'error': INVALID_SESSION_MSG}), 400
-	file = request.files.get('image')
-	if not file:
-		return jsonify({'error': NO_IMAGE_MSG}), 400
-	
-	try:
-		filename = secure_filename(file.filename)
-		temp_dir = get_session_temp_dir(session_id)
-		temp_path = os.path.join(temp_dir, f"student_id_{filename}")
-		file.save(temp_path)
-		
-		student_id = scan_student_id(temp_path)
-		
-		# Validate result
-		if not validate_scan_result('student_id', student_id):
-			logger.warning(f"Invalid student_id scan result: {student_id}")
-			return jsonify({'error': f'Invalid student ID format: {student_id}'}), 400
-		
-		set_session_data(session_id, 'student_id', student_id)
-		logger.info(f"Session {session_id}: scanned student_id = {student_id}")
-		return jsonify({'student_id': student_id})
-	except Exception as e:
-		logger.error(f"Error processing student_id: {e}")
-		return jsonify({'error': 'Failed to process image'}), 500
-
-@app.route('/exam/exam_code', methods=['POST'])
-def receive_exam_code():
-	session_id = request.form.get('session_id')
-	session_data = get_session_data(session_id)
-	if not session_id or not session_data:
-		return jsonify({'error': INVALID_SESSION_MSG}), 400
-	file = request.files.get('image')
-	if not file:
-		return jsonify({'error': NO_IMAGE_MSG}), 400
-	
-	try:
-		filename = secure_filename(file.filename)
-		temp_dir = get_session_temp_dir(session_id)
-		temp_path = os.path.join(temp_dir, f"exam_code_{filename}")
-		file.save(temp_path)
-		
-		exam_code = scan_exam_code(temp_path)
-		
-		# Validate result
-		if not validate_scan_result('exam_code', exam_code):
-			logger.warning(f"Invalid exam_code scan result: {exam_code}")
-			return jsonify({'error': f'Invalid exam code format: {exam_code}'}), 400
-		
-		set_session_data(session_id, 'exam_code', exam_code)
-		logger.info(f"Session {session_id}: scanned exam_code = {exam_code}")
-		return jsonify({'exam_code': exam_code})
-	except Exception as e:
-		logger.error(f"Error processing exam_code: {e}")
-		return jsonify({'error': 'Failed to process image'}), 500
-
-def process_part_scan(part_name, scan_func):
-	"""Generic handler for p1, p2, p3 endpoints (session flow).
-
-	Saves the uploaded image path into the session and returns an
-	acknowledgement value so the client can proceed. Actual scoring is
-	computed at /exam/finish using scan_all_answers.
-	"""
-	session_id = request.form.get('session_id')
-	session_data = get_session_data(session_id)
-	if not session_id or not session_data:
-		return jsonify({'error': INVALID_SESSION_MSG}), 400
-	file = request.files.get('image')
-	if not file:
-		return jsonify({'error': NO_IMAGE_MSG}), 400
-	
-	try:
-		filename = secure_filename(file.filename)
-		temp_dir = get_session_temp_dir(session_id)
-		temp_path = os.path.join(temp_dir, f"{part_name}_{filename}")
-		file.save(temp_path)
-		
-		# Save image path for finish step
-		set_session_data(session_id, f'{part_name}_img', temp_path)
-		
-		# Optional early scan to warm up pipelines (ignore value/errors)
-		try:
-			_ = scan_func(temp_path)
-		except Exception as scan_err:
-			logger.warning(f"{part_name} early scan failed (ignored, will scan at finish): {scan_err}")
-		
-		# Do not treat p1/p2/p3 result here as a score. Use placeholder.
-		placeholder_score = 0
-		set_session_data(session_id, f'score_{part_name}', str(placeholder_score))
-		logger.info(f"Session {session_id}: received image for {part_name}, placeholder score set to 0")
-		return jsonify({f'score_{part_name}': placeholder_score})
-	except Exception as e:
-		logger.error(f"Error processing {part_name}: {e}")
-		return jsonify({'error': f'Failed to process {part_name} image'}), 500
-
-@app.route('/exam/p1', methods=['POST'])
-def receive_p1():
-	return process_part_scan('p1', scan_p1)
-
-@app.route('/exam/p2', methods=['POST'])
-def receive_p2():
-	return process_part_scan('p2', scan_p2)
-
-@app.route('/exam/p3', methods=['POST'])
-def receive_p3():
-	return process_part_scan('p3', scan_p3)
-
-@app.route('/exam/finish', methods=['POST'])
-def finish_exam():
-	session_id = request.form.get('session_id')
-	created_by = request.form.get('created_by')
-	correct_ans_id = request.form.get('correct_ans_id')  # optional, not required
-	
-	session_data = get_session_data(session_id)
-	if not session_id or not session_data:
-		return jsonify({'error': INVALID_SESSION_MSG}), 400
-	
-	try:
-		# Get all data from session
-		data = {}
-		if USE_REDIS:
-			data = redis_client.hgetall(f"session:{session_id}")
-		else:
-			data = scan_sessions.get(session_id, {})
-		
-		# Check required fields (relaxed)
-		required_fields = ['student_id', 'exam_code']
-		if not all(field in data for field in required_fields):
-			missing = [f for f in required_fields if f not in data]
-			return jsonify({'error': f'Missing required data: {missing}'}), 400
-		
-		# Get scores with defaults
-		score_p1 = float(data.get('score_p1', 0))
-		score_p2 = float(data.get('score_p2', 0))
-		score_p3 = float(data.get('score_p3', 0))
-		
-		# Scan answers if images available
-		scanned_ans = []
-		p1_img = data.get('p1_img')
-		p2_img = data.get('p2_img')
-		p3_img = data.get('p3_img')
-		
-		if p1_img and p2_img and p3_img:
-			try:
-				scanned_ans = scan_all_answers(p1_img, p2_img, p3_img)
-				logger.info(f"Session {session_id}: scanned {len(scanned_ans)} answers")
-			except Exception as e:
-				logger.error(f"Error scanning answers: {e}")
-		
-		# Get correct answers with caching by exam_code (prefer session exam_code)
-		correct_ans_obj = None
-		if 'exam_code' in data:
-			correct_ans_obj = get_correct_answers_by_exam_code_cached(data['exam_code'])
-			if correct_ans_obj:
-				logger.info(f"Using cached correct answers for exam_code={data['exam_code']}")
-		
-		# Calculate total score
-		total_score = 0.0
-		if correct_ans_obj and scanned_ans:
-			total_score = score_answers(scanned_ans, correct_ans_obj.answers)
-			logger.info(f"Session {session_id}: calculated total_score = {total_score}")
-		
-		# Create exam record
-		exam = Exam(
-			student_id=data['student_id'],
-			exam_code=data['exam_code'],
-			score_p1=score_p1,
-			score_p2=score_p2,
-			score_p3=score_p3,
-			total_score=total_score,
-			created_by=created_by if created_by else None,
-			correct_ans=correct_ans_id if correct_ans_id else None
-		)
-		ExamDbService.create_exam(exam)
-		logger.info(f"Session {session_id}: created exam record")
-		
-		# Cleanup session
-		delete_session(session_id)
-		
-		return jsonify({
-			'student_id': exam.student_id,
-			'exam_code': exam.exam_code,
-			'score_p1': exam.score_p1,
-			'score_p2': exam.score_p2,
-			'score_p3': exam.score_p3,
-			'total_score': exam.total_score,
-			'scanned_ans': scanned_ans,
-			'correct_ans_id': str(exam.correct_ans) if exam.correct_ans else None
-		})
-	except Exception as e:
-		logger.error(f"Error finishing exam: {e}")
-		return jsonify({'error': 'Failed to complete exam processing'}), 500
-
-
-from services.Auth.auth_service import AuthService
-import os
-from services.Db.exam_db_service import ExamDbService
-from Models.exam import Exam
-
-# Auth endpoints
-@app.route('/signup', methods=['POST'])
+@app.route('/auth/signup', methods=['POST'])
 def signup():
-	data = request.get_json()
-	email = data.get('email')
-	password = data.get('password')
-	result = AuthService.sign_up(email, password)
-	return jsonify(result)
+    """Register new user"""
+    data = request.get_json()
+    email = data.get('email')
+    password = data.get('password')
+    
+    if not email or not password:
+        return jsonify({'error': 'Email and password required'}), 400
+    
+    result = AuthService.sign_up(email, password)
+    status = 201 if 'user' in result else 400
+    return jsonify(result), status
 
-@app.route('/login', methods=['POST'])
+
+@app.route('/auth/login', methods=['POST'])
 def login():
-	data = request.get_json()
-	email = data.get('email')
-	password = data.get('password')
-	result = AuthService.login(email, password)
-	return jsonify(result)
+    """Login user"""
+    data = request.get_json()
+    email = data.get('email')
+    password = data.get('password')
+    
+    if not email or not password:
+        return jsonify({'error': 'Email and password required'}), 400
+    
+    result = AuthService.login(email, password)
+    status = 200 if 'user' in result else 401
+    return jsonify(result), status
 
-@app.route('/logout', methods=['POST'])
+
+@app.route('/auth/logout', methods=['POST'])
 def logout():
-	data = request.get_json()
-	email = data.get('email')
-	result = AuthService.logout(email)
-	return jsonify(result)
+    """Logout user"""
+    data = request.get_json()
+    email = data.get('email')
+    
+    if not email:
+        return jsonify({'error': 'Email required'}), 400
+    
+    result = AuthService.logout(email)
+    return jsonify(result)
 
-# # Process endpoints
 
-from services.Grade.scan_student_id import scan_exam_code, scan_p1, scan_p2, scan_p3
+# ============================================================================
+# EXAM SESSION ENDPOINTS (Multi-step flow)
+# ============================================================================
 
-# Nhận ảnh trực tiếp cho từng phần
-@app.route('/scan/student_id', methods=['POST'])
-def scan_student_id_endpoint():
-	if 'image' not in request.files:
-		return jsonify({'error': 'No image uploaded'}), 400
-	file = request.files['image']
-	filename = secure_filename(file.filename)
-	with tempfile.NamedTemporaryFile(delete=False, suffix=filename) as tmp:
-		file.save(tmp.name)
-		result = scan_student_id(tmp.name)
-	return jsonify({'student_id': result})
+@app.route('/exam/session/start', methods=['POST'])
+def start_exam_session():
+    """Start new exam scanning session"""
+    session_id = str(uuid.uuid4())
+    set_session_data(session_id, 'created_at', datetime.now().isoformat())
+    set_session_data(session_id, 'status', 'started')
+    
+    logger.info(f"Started session: {session_id}")
+    return jsonify({'session_id': session_id}), 201
 
-@app.route('/scan/exam_code', methods=['POST'])
-def scan_exam_code_endpoint():
-	if 'image' not in request.files:
-		return jsonify({'error': 'No image uploaded'}), 400
-	file = request.files['image']
-	filename = secure_filename(file.filename)
-	with tempfile.NamedTemporaryFile(delete=False, suffix=filename) as tmp:
-		file.save(tmp.name)
-		result = scan_exam_code(tmp.name)
-	return jsonify({'exam_code': result})
 
-@app.route('/scan/p1', methods=['POST'])
-def scan_p1_endpoint():
-	if 'image' not in request.files:
-		return jsonify({'error': 'No image uploaded'}), 400
-	file = request.files['image']
-	filename = secure_filename(file.filename)
-	with tempfile.NamedTemporaryFile(delete=False, suffix=filename) as tmp:
-		file.save(tmp.name)
-		result = scan_p1(tmp.name)
-	return jsonify({'score_p1': result})
+@app.route('/exam/session/student_id', methods=['POST'])
+def upload_student_id():
+    """Upload student ID image"""
+    session_id = request.form.get('session_id')
+    
+    if not session_id or not get_session_data(session_id):
+        return jsonify({'error': 'Invalid session'}), 400
+    
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image provided'}), 400
+    
+    try:
+        file = request.files['image']
+        filepath = save_uploaded_file(file, session_id, 'student_id')
+        student_id = scan_student_id(filepath)
+        
+        set_session_data(session_id, 'student_id', student_id)
+        set_session_data(session_id, 'student_id_img', filepath)
+        
+        return jsonify({'student_id': student_id})
+    except Exception as e:
+        logger.error(f"Error scanning student ID: {e}")
+        return jsonify({'error': 'Failed to process image'}), 500
 
-@app.route('/scan/p2', methods=['POST'])
-def scan_p2_endpoint():
-	if 'image' not in request.files:
-		return jsonify({'error': 'No image uploaded'}), 400
-	file = request.files['image']
-	filename = secure_filename(file.filename)
-	with tempfile.NamedTemporaryFile(delete=False, suffix=filename) as tmp:
-		file.save(tmp.name)
-		result = scan_p2(tmp.name)
-	return jsonify({'score_p2': result})
 
-@app.route('/scan/p3', methods=['POST'])
-def scan_p3_endpoint():
-	if 'image' not in request.files:
-		return jsonify({'error': 'No image uploaded'}), 400
-	file = request.files['image']
-	filename = secure_filename(file.filename)
-	with tempfile.NamedTemporaryFile(delete=False, suffix=filename) as tmp:
-		file.save(tmp.name)
-		result = scan_p3(tmp.name)
-	return jsonify({'score_p3': result})
+@app.route('/exam/session/exam_code', methods=['POST'])
+def upload_exam_code():
+    """Upload exam code image"""
+    session_id = request.form.get('session_id')
+    
+    if not session_id or not get_session_data(session_id):
+        return jsonify({'error': 'Invalid session'}), 400
+    
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image provided'}), 400
+    
+    try:
+        file = request.files['image']
+        filepath = save_uploaded_file(file, session_id, 'exam_code')
+        exam_code = scan_exam_code(filepath)
+        
+        set_session_data(session_id, 'exam_code', exam_code)
+        set_session_data(session_id, 'exam_code_img', filepath)
+        
+        return jsonify({'exam_code': exam_code})
+    except Exception as e:
+        logger.error(f"Error scanning exam code: {e}")
+        return jsonify({'error': 'Failed to process image'}), 500
 
-# Exam CRUD endpoints
-@app.route('/exam', methods=['POST'])
-def create_exam():
-	data = request.get_json()
-	exam = Exam(
-		student_id=data.get('student_id'),
-		exam_code=data.get('exam_code'),
-		score_p1=data.get('score_p1', 0.0),
-		score_p2=data.get('score_p2', 0.0),
-		score_p3=data.get('score_p3', 0.0),
-		total_score=data.get('total_score', 0.0),
-		created_by=data.get('created_by')
-	)
-	ExamDbService.create_exam(exam)
-	return jsonify({'message': 'Exam created', 'exam': exam.to_dict()})
 
-@app.route('/exam/<exam_id>', methods=['GET'])
-def get_exam(exam_id):
-	exam = ExamDbService.get_exam_by_id(exam_id)
-	if exam:
-		return jsonify(exam)
-	return jsonify({'error': 'Exam not found'}), 404
+@app.route('/exam/session/part/<part_name>', methods=['POST'])
+def upload_exam_part(part_name):
+    """Upload exam part image (p1, p2, or p3)"""
+    if part_name not in ['p1', 'p2', 'p3']:
+        return jsonify({'error': 'Invalid part name'}), 400
+    
+    session_id = request.form.get('session_id')
+    
+    if not session_id or not get_session_data(session_id):
+        return jsonify({'error': 'Invalid session'}), 400
+    
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image provided'}), 400
+    
+    try:
+        file = request.files['image']
+        filepath = save_uploaded_file(file, session_id, part_name)
+        
+        set_session_data(session_id, f'{part_name}_img', filepath)
+        
+        return jsonify({'message': f'{part_name} uploaded successfully'})
+    except Exception as e:
+        logger.error(f"Error uploading {part_name}: {e}")
+        return jsonify({'error': 'Failed to process image'}), 500
 
-@app.route('/exam/<exam_id>', methods=['PUT'])
-def update_exam(exam_id):
-	update_fields = request.get_json()
-	success = ExamDbService.update_exam(exam_id, update_fields)
-	if success:
-		return jsonify({'message': 'Exam updated'})
-	return jsonify({'error': 'Exam not found or not updated'}), 404
 
-@app.route('/exam/<exam_id>', methods=['DELETE'])
-def delete_exam(exam_id):
-	success = ExamDbService.delete_exam(exam_id)
-	if success:
-		return jsonify({'message': 'Exam deleted'})
-	return jsonify({'error': 'Exam not found'}), 404
+@app.route('/exam/session/finish', methods=['POST'])
+def finish_exam_session():
+    """Complete exam session and calculate final score"""
+    session_id = request.form.get('session_id')
+    created_by = request.form.get('created_by')
+    
+    if not session_id or not get_session_data(session_id):
+        return jsonify({'error': 'Invalid session'}), 400
+    
+    try:
+        # Get session data
+        data = get_session_data(session_id)
+        
+        # Validate required fields
+        if 'student_id' not in data or 'exam_code' not in data:
+            return jsonify({'error': 'Missing student_id or exam_code'}), 400
+        
+        student_id = data['student_id']
+        exam_code = data['exam_code']
+        
+        # Get image paths
+        p1_img = data.get('p1_img')
+        p2_img = data.get('p2_img')
+        p3_img = data.get('p3_img')
+        
+        # Initialize scores
+        score_p1 = 0.0
+        score_p2 = 0.0
+        score_p3 = 0.0
+        total_score = 0.0
+        scanned_answers = []
+        
+        # Scan and grade if all parts are available
+        if p1_img and p2_img and p3_img:
+            try:
+                scanned_answers = scan_all_answers(p1_img, p2_img, p3_img)
+                logger.info(f"Scanned {len(scanned_answers)} answers")
+                
+                # Get correct answers
+                correct_ans = get_cached_correct_answers(exam_code)
+                
+                if correct_ans:
+                    total_score = score_answers(
+                        scanned_answers, correct_ans.answers
+                    )
+                    logger.info(f"Calculated score: {total_score}")
+                else:
+                    logger.warning(f"No correct answers for exam: {exam_code}")
+            
+            except Exception as e:
+                logger.error(f"Error during grading: {e}")
+        
+        # Create exam record
+        exam = Exam(
+            student_id=student_id,
+            exam_code=exam_code,
+            score_p1=score_p1,
+            score_p2=score_p2,
+            score_p3=score_p3,
+            total_score=total_score,
+            created_by=created_by if created_by else None
+        )
+        
+        ExamDbService.create_exam(exam)
+        
+        # Cleanup session
+        delete_session(session_id)
+        
+        return jsonify({
+            'student_id': student_id,
+            'exam_code': exam_code,
+            'total_score': total_score,
+            'scanned_answers_count': len(scanned_answers),
+            'message': 'Exam graded successfully'
+        }), 201
+    
+    except Exception as e:
+        logger.error(f"Error finishing exam: {e}")
+        return jsonify({'error': 'Failed to complete exam'}), 500
+
+
+# ============================================================================
+# EXAM CRUD ENDPOINTS
+# ============================================================================
 
 @app.route('/exams', methods=['GET'])
 def list_exams():
-	exams = ExamDbService.list_exams()
-	return jsonify(exams)
+    """List all exams with optional filters"""
+    student_id = request.args.get('student_id')
+    exam_code = request.args.get('exam_code')
+    
+    filter_dict = {}
+    if student_id:
+        filter_dict['student_id'] = student_id
+    if exam_code:
+        filter_dict['exam_code'] = exam_code
+    
+    exams = ExamDbService.list_exams(filter_dict)
+    return jsonify(exams)
 
-# Endpoint tạo đáp án đúng
-@app.route('/correctans/create', methods=['POST'])
-def create_correct_ans():
-	p1_img = request.files.get('p1_img')
-	p2_img = request.files.get('p2_img')
-	p3_img = request.files.get('p3_img')
-	exam_code = request.form.get('exam_code')
 
-	if not p1_img or not p2_img or not p3_img or not exam_code:
-		return jsonify({'error': 'Missing data'}), 400
+@app.route('/exams/<exam_id>', methods=['GET'])
+def get_exam(exam_id):
+    """Get specific exam by ID"""
+    exam = ExamDbService.get_exam_by_id(exam_id)
+    
+    if not exam:
+        return jsonify({'error': 'Exam not found'}), 404
+    
+    return jsonify(exam)
 
-	import tempfile
-	from werkzeug.utils import secure_filename
-	with tempfile.NamedTemporaryFile(delete=False, suffix=secure_filename(p1_img.filename)) as tmp1, \
-		 tempfile.NamedTemporaryFile(delete=False, suffix=secure_filename(p2_img.filename)) as tmp2, \
-		 tempfile.NamedTemporaryFile(delete=False, suffix=secure_filename(p3_img.filename)) as tmp3:
-		p1_img.save(tmp1.name)
-		p2_img.save(tmp2.name)
-		p3_img.save(tmp3.name)
-		answers = scan_all_answers(tmp1.name, tmp2.name, tmp3.name)
 
-	from pymongo import MongoClient
-	import os
-	MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
-	client = MongoClient(MONGO_URI)
-	db = client['be_db']
-	correctans_collection = db['correctans']
-	result = correctans_collection.insert_one({'id': exam_code, 'answers': answers})
+@app.route('/exams/<exam_id>', methods=['PUT'])
+def update_exam(exam_id):
+    """Update exam"""
+    update_fields = request.get_json()
+    
+    if not update_fields:
+        return jsonify({'error': 'No update data provided'}), 400
+    
+    success = ExamDbService.update_exam(exam_id, update_fields)
+    
+    if not success:
+        return jsonify({'error': 'Exam not found or not updated'}), 404
+    
+    return jsonify({'message': 'Exam updated successfully'})
 
-	return jsonify({'message': 'Correct answers created', 'answers': answers, 'correct_ans_id': str(result.inserted_id)})
 
-# Search correct answers by exam_code
-@app.route('/correctans/search', methods=['GET'])
-def search_correct_ans():
-	exam_code = request.args.get('exam_code')
-	if not exam_code:
-		return jsonify({'error': 'Missing exam_code'}), 400
-	try:
-		from pymongo import MongoClient
-		import os
-		MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
-		client = MongoClient(MONGO_URI)
-		db = client['be_db']
-		correctans_collection = db['correctans']
-		correct_data = correctans_collection.find_one({'id': exam_code})
-		if not correct_data:
-			return jsonify({'error': 'Not found'}), 404
-		return jsonify({
-			'correct_ans_id': str(correct_data.get('_id')),
-			'exam_code': correct_data.get('id'),
-			'answers': correct_data.get('answers', [])
-		})
-	except Exception as e:
-		logger.error(f"Error searching correct answers: {e}")
-		return jsonify({'error': 'Database error'}), 500
+@app.route('/exams/<exam_id>', methods=['DELETE'])
+def delete_exam(exam_id):
+    """Delete exam"""
+    success = ExamDbService.delete_exam(exam_id)
+    
+    if not success:
+        return jsonify({'error': 'Exam not found'}), 404
+    
+    return jsonify({'message': 'Exam deleted successfully'})
 
-# Create correct answers manually from provided answers list
-@app.route('/correctans/create_manual', methods=['POST'])
-def create_correct_ans_manual():
-	try:
-		data = request.get_json(force=True, silent=True) or {}
-		exam_code = data.get('exam_code')
-		answers = data.get('answers')  # expected list of [question, answer]
-		if not exam_code or not isinstance(answers, list):
-			return jsonify({'error': 'Missing exam_code or answers'}), 400
-		from pymongo import MongoClient
-		import os
-		MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
-		client = MongoClient(MONGO_URI)
-		db = client['be_db']
-		correctans_collection = db['correctans']
-		# upsert by exam_code id
-		correctans_collection.update_one(
-			{'id': exam_code},
-			{'$set': {'answers': answers}},
-			upsert=True
-		)
-		# fetch the document to get _id (for both insert/update)
-		doc = correctans_collection.find_one({'id': exam_code})
-		return jsonify({'message': 'Correct answers saved', 'correct_ans_id': str(doc.get('_id')), 'exam_code': exam_code, 'answers': answers})
-	except Exception as e:
-		logger.error(f"Error creating manual correct answers: {e}")
-		return jsonify({'error': 'Failed to save correct answers'}), 500
 
-# Health check endpoint
+@app.route('/exams', methods=['POST'])
+def create_exam_manual():
+    """Manually create exam record"""
+    data = request.get_json()
+    
+    required = ['student_id', 'exam_code']
+    if not all(field in data for field in required):
+        return jsonify({'error': 'Missing required fields'}), 400
+    
+    exam = Exam(
+        student_id=data['student_id'],
+        exam_code=data['exam_code'],
+        score_p1=data.get('score_p1', 0.0),
+        score_p2=data.get('score_p2', 0.0),
+        score_p3=data.get('score_p3', 0.0),
+        total_score=data.get('total_score', 0.0),
+        created_by=data.get('created_by')
+    )
+    
+    ExamDbService.create_exam(exam)
+    
+    return jsonify({
+        'message': 'Exam created',
+        'exam': exam.to_dict()
+    }), 201
+
+
+# ============================================================================
+# CORRECT ANSWERS CRUD ENDPOINTS
+# ============================================================================
+
+@app.route('/correctans', methods=['POST'])
+def create_correct_answers():
+    """Create correct answers from images"""
+    if not all(k in request.files for k in ['p1_img', 'p2_img', 'p3_img']):
+        return jsonify({'error': 'Missing image files'}), 400
+    
+    exam_code = request.form.get('exam_code')
+    if not exam_code:
+        return jsonify({'error': 'Missing exam_code'}), 400
+    
+    try:
+        # Save uploaded files
+        p1_file = request.files['p1_img']
+        p2_file = request.files['p2_img']
+        p3_file = request.files['p3_img']
+        
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix=secure_filename(p1_file.filename)
+        ) as tmp1, \
+            tempfile.NamedTemporaryFile(
+                delete=False, suffix=secure_filename(p2_file.filename)
+            ) as tmp2, \
+            tempfile.NamedTemporaryFile(
+                delete=False, suffix=secure_filename(p3_file.filename)
+            ) as tmp3:
+            
+            p1_file.save(tmp1.name)
+            p2_file.save(tmp2.name)
+            p3_file.save(tmp3.name)
+            
+            # Scan answers
+            answers = scan_all_answers(tmp1.name, tmp2.name, tmp3.name)
+        
+        # Save to database
+        correct_ans = CorrectAns(id=exam_code, answers=answers)
+        correctans_id = CorrectAnsDbService.create_correct_ans(correct_ans)
+        
+        return jsonify({
+            'message': 'Correct answers created',
+            'correctans_id': correctans_id,
+            'exam_code': exam_code,
+            'answers_count': len(answers)
+        }), 201
+    
+    except Exception as e:
+        logger.error(f"Error creating correct answers: {e}")
+        return jsonify({'error': 'Failed to create correct answers'}), 500
+
+
+@app.route('/correctans/manual', methods=['POST'])
+def create_correct_answers_manual():
+    """Manually create correct answers"""
+    data = request.get_json()
+    
+    exam_code = data.get('exam_code')
+    answers = data.get('answers')
+    
+    if not exam_code or not isinstance(answers, list):
+        return jsonify({'error': 'Invalid data'}), 400
+    
+    try:
+        correct_ans = CorrectAns(id=exam_code, answers=answers)
+        CorrectAnsDbService.update_correct_ans(exam_code, answers)
+        
+        return jsonify({
+            'message': 'Correct answers saved',
+            'exam_code': exam_code,
+            'answers_count': len(answers)
+        }), 201
+    
+    except Exception as e:
+        logger.error(f"Error saving correct answers: {e}")
+        return jsonify({'error': 'Failed to save correct answers'}), 500
+
+
+@app.route('/correctans/<exam_code>', methods=['GET'])
+def get_correct_answers(exam_code):
+    """Get correct answers by exam code"""
+    correct_ans = CorrectAnsDbService.get_correct_ans_by_exam_code(exam_code)
+    
+    if not correct_ans:
+        return jsonify({'error': 'Correct answers not found'}), 404
+    
+    return jsonify({
+        'exam_code': correct_ans.id,
+        'answers': correct_ans.answers,
+        'answers_count': len(correct_ans.answers)
+    })
+
+
+@app.route('/correctans/<exam_code>', methods=['PUT'])
+def update_correct_answers(exam_code):
+    """Update correct answers"""
+    data = request.get_json()
+    answers = data.get('answers')
+    
+    if not isinstance(answers, list):
+        return jsonify({'error': 'Invalid answers data'}), 400
+    
+    success = CorrectAnsDbService.update_correct_ans(exam_code, answers)
+    
+    if not success:
+        return jsonify({'error': 'Failed to update'}), 500
+    
+    return jsonify({'message': 'Correct answers updated'})
+
+
+@app.route('/correctans/<exam_code>', methods=['DELETE'])
+def delete_correct_answers(exam_code):
+    """Delete correct answers"""
+    success = CorrectAnsDbService.delete_correct_ans(exam_code)
+    
+    if not success:
+        return jsonify({'error': 'Correct answers not found'}), 404
+    
+    return jsonify({'message': 'Correct answers deleted'})
+
+
+@app.route('/correctans', methods=['GET'])
+def list_correct_answers():
+    """List all correct answers"""
+    correct_ans_list = CorrectAnsDbService.list_all_correct_ans()
+    
+    return jsonify([
+        {
+            'exam_code': ca.id,
+            'answers_count': len(ca.answers)
+        }
+        for ca in correct_ans_list
+    ])
+
+
+# ============================================================================
+# DIRECT SCAN ENDPOINTS (Single step)
+# ============================================================================
+
+@app.route('/scan/student_id', methods=['POST'])
+def scan_student_id_direct():
+    """Direct scan of student ID image"""
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image provided'}), 400
+    
+    try:
+        file = request.files['image']
+        
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix=secure_filename(file.filename)
+        ) as tmp:
+            file.save(tmp.name)
+            result = scan_student_id(tmp.name)
+        
+        return jsonify({'student_id': result})
+    
+    except Exception as e:
+        logger.error(f"Error scanning student ID: {e}")
+        return jsonify({'error': 'Failed to scan'}), 500
+
+
+@app.route('/scan/exam_code', methods=['POST'])
+def scan_exam_code_direct():
+    """Direct scan of exam code image"""
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image provided'}), 400
+    
+    try:
+        file = request.files['image']
+        
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix=secure_filename(file.filename)
+        ) as tmp:
+            file.save(tmp.name)
+            result = scan_exam_code(tmp.name)
+        
+        return jsonify({'exam_code': result})
+    
+    except Exception as e:
+        logger.error(f"Error scanning exam code: {e}")
+        return jsonify({'error': 'Failed to scan'}), 500
+
+
+@app.route('/scan/answers', methods=['POST'])
+def scan_answers_direct():
+    """Direct scan of all answer sheets"""
+    required = ['p1_img', 'p2_img', 'p3_img']
+    if not all(k in request.files for k in required):
+        return jsonify({'error': 'Missing image files'}), 400
+    
+    try:
+        files = {k: request.files[k] for k in required}
+        
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix=secure_filename(files['p1_img'].filename)
+        ) as tmp1, \
+            tempfile.NamedTemporaryFile(
+                delete=False, suffix=secure_filename(files['p2_img'].filename)
+            ) as tmp2, \
+            tempfile.NamedTemporaryFile(
+                delete=False, suffix=secure_filename(files['p3_img'].filename)
+            ) as tmp3:
+            
+            files['p1_img'].save(tmp1.name)
+            files['p2_img'].save(tmp2.name)
+            files['p3_img'].save(tmp3.name)
+            
+            answers = scan_all_answers(tmp1.name, tmp2.name, tmp3.name)
+        
+        return jsonify({
+            'answers': answers,
+            'answers_count': len(answers)
+        })
+    
+    except Exception as e:
+        logger.error(f"Error scanning answers: {e}")
+        return jsonify({'error': 'Failed to scan'}), 500
+
+
+# ============================================================================
+# HEALTH & STATUS ENDPOINTS
+# ============================================================================
+
 @app.route('/health', methods=['GET'])
 def health_check():
-	"""Check system health status"""
-	try:
-		# Check MongoDB
-		from pymongo import MongoClient
-		import os
-		MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
-		client = MongoClient(MONGO_URI)
-		db = client['be_db']
-		db.command('ping')
-		mongo_status = "healthy"
-	except:
-		mongo_status = "unhealthy"
-	
-	# Check Redis
-	redis_status = "healthy" if USE_REDIS and redis_client.ping() else "not_configured"
-	
-	# Get session count
-	session_count = 0
-	if USE_REDIS:
-		session_count = len(redis_client.keys("session:*"))
-	else:
-		session_count = len(scan_sessions)
-	
-	return jsonify({
-		'status': 'healthy' if mongo_status == 'healthy' else 'degraded',
-		'services': {
-			'mongodb': mongo_status,
-			'redis': redis_status
-		},
-		'metrics': {
-			'active_sessions': session_count
-		},
-		'timestamp': datetime.now().isoformat()
-	})
+    """System health check"""
+    try:
+        from pymongo import MongoClient
+        MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
+        client = MongoClient(MONGO_URI)
+        db = client['be_db']
+        db.command('ping')
+        mongo_status = "healthy"
+    except Exception:
+        mongo_status = "unhealthy"
+    
+    redis_status = "not_configured"
+    if USE_REDIS:
+        try:
+            redis_client.ping()
+            redis_status = "healthy"
+        except Exception:
+            redis_status = "unhealthy"
+    
+    session_count = 0
+    if USE_REDIS:
+        session_count = len(redis_client.keys("session:*"))
+    else:
+        session_count = len(scan_sessions)
+    
+    return jsonify({
+        'status': 'healthy' if mongo_status == 'healthy' else 'degraded',
+        'timestamp': datetime.now().isoformat(),
+        'services': {
+            'mongodb': mongo_status,
+            'redis': redis_status
+        },
+        'metrics': {
+            'active_sessions': session_count
+        }
+    })
+
+
+@app.route('/', methods=['GET'])
+def root():
+    """API root endpoint"""
+    return jsonify({
+        'name': 'Exam Grading API',
+        'version': '1.0.0',
+        'endpoints': {
+            'auth': '/auth/*',
+            'exams': '/exams',
+            'correctans': '/correctans',
+            'sessions': '/exam/session/*',
+            'scan': '/scan/*',
+            'health': '/health'
+        }
+    })
+
+
+# ============================================================================
+# APPLICATION STARTUP
+# ============================================================================
 
 if __name__ == '__main__':
-    # Initialize DB indexes on startup
-    initialize_db_indexes()
-    
-    # Run app
-    app.run(host='0.0.0.0', port=5000)
+    logger.info("Starting Exam Grading API...")
+    app.run(host='0.0.0.0', port=5000, debug=False)

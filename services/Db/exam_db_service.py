@@ -24,6 +24,8 @@ class ExamDbService:
         except Exception:
             return None
         data = exams_collection.find_one({'_id': obj_id})
+        if data:
+            data['_id'] = str(data['_id'])
         return data
 
     @staticmethod
@@ -47,7 +49,10 @@ class ExamDbService:
     @staticmethod
     def list_exams(filter_dict=None):
         filter_dict = filter_dict or {}
-        return list(exams_collection.find(filter_dict))
+        docs = list(exams_collection.find(filter_dict))
+        for doc in docs:
+            doc['_id'] = str(doc['_id'])
+        return docs
     
     @staticmethod
     def bulk_create_exams(exam_list):
