@@ -5,15 +5,29 @@ Tests all endpoints and core functionality reliably
 import requests
 import time
 
+# For testing with Flask test client
+from main import app
+
 API_URL = "http://localhost:5000"
+
+# Use test client for debugging
+test_client = app.test_client()
 
 
 def assert_response(response, expected_status=200, description=""):
     """Assert response status and log results"""
     try:
-        data = response.json()
+        if hasattr(response, 'get_json'):
+            # Flask test client response
+            data = response.get_json()
+        else:
+            # requests response
+            data = response.json()
     except ValueError:
-        data = response.text
+        if hasattr(response, 'data'):
+            data = response.data.decode('utf-8')
+        else:
+            data = response.text
 
     status = "✅ PASS" if response.status_code == expected_status else "❌ FAIL"
     print(f"{status} {description}: {response.status_code}")
@@ -108,33 +122,34 @@ def test_exam_crud():
 
     # Create
     exam_data = {
-        "student_id": unique_student,
         "exam_code": unique_code,
-        "total_score": 8.5
+        "total_score": 8.5  # Create a graded exam record
     }
-    response = requests.post(f"{API_URL}/exams", json=exam_data)
+    response = test_client.post('/exams', json=exam_data)
+    print(f"Debug: sent data: {exam_data}")
+    print(f"Debug: response: {response.status_code} {response.get_data(as_text=True)}")
     assert_response(response, 201, "Create exam")
-    data = response.json()
-    assert "exam" in data
+    data = response.get_json()
+    assert "exam_id" in data
+    exam_id = data["exam_id"]  # Get the exam ID directly from response
 
     # List
-    response = requests.get(f"{API_URL}/exams")
+    response = test_client.get('/exams')
     assert_response(response, 200, "List exams")
-    exams = response.json()
+    exams = response.get_json()
     assert len(exams) >= 1
-    exam_id = exams[0]["_id"]
 
     # Get one
-    response = requests.get(f"{API_URL}/exams/{exam_id}")
+    response = test_client.get(f'/exams/{exam_id}')
     assert_response(response, 200, "Get exam by ID")
 
     # Update
     update_data = {"total_score": 9.0}
-    response = requests.put(f"{API_URL}/exams/{exam_id}", json=update_data)
+    response = test_client.put(f'/exams/{exam_id}', json=update_data)
     assert_response(response, 200, "Update exam")
 
     # Delete
-    response = requests.delete(f"{API_URL}/exams/{exam_id}")
+    response = test_client.delete(f'/exams/{exam_id}')
     assert_response(response, 200, "Delete exam")
     print("   CRUD operations successful")
 
@@ -230,12 +245,9 @@ def test_exam_session_with_real_images():
             print(f"   ⚠️ {part.upper()} upload failed: "
                   f"{response.status_code}")
 
-    # Finish session
-    response = requests.post(f"{API_URL}/exam/session/finish",
-                             data={
-                                 'session_id': session_id,
-                                 'created_by': 'test_user'
-                             })
+    # Finish session (grade the exam)
+    response = requests.post(f"{API_URL}/exam/session/grade",
+                             data={'session_id': session_id})
     if response.status_code == 201:
         result = response.json()
         score = result.get('total_score', 0.0)
@@ -251,6 +263,7 @@ def test_exam_session_with_real_images():
                   "may vary")
     else:
         print(f"   ⚠️ Session finish failed: {response.status_code}")
+        print(f"   Response: {response.text}")
 
     # Cleanup correct answers if we set them up
     if 'scanned_exam_code' in locals() and scanned_exam_code:
@@ -280,26 +293,16 @@ def test_direct_scanning():
         'p3': 'services/Process/test.jpg'
     }
 
-    # Test missing image handling (should still work)
-    response = requests.post(f"{API_URL}/scan/student_id")
-    assert_response(response, 400, "Student ID scan - missing image")
-
+    # Test missing image handling (should return 400 for existing endpoints)
     response = requests.post(f"{API_URL}/scan/exam_code")
     assert_response(response, 400, "Exam code scan - missing image")
 
     response = requests.post(f"{API_URL}/scan/answers")
     assert_response(response, 400, "Answer scan - missing images")
 
-    # Test with real images if available
-    if os.path.exists(test_images['student_id']):
-        with open(test_images['student_id'], 'rb') as f:
-            files = {'image': ('test.jpg', f, 'image/jpeg')}
-            response = requests.post(f"{API_URL}/scan/student_id", files=files)
-        if response.status_code == 200:
-            print("   ✅ Real student ID scan successful")
-        else:
-            print(f"   ⚠️ Real student ID scan failed: {response.status_code}")
+    # Note: /scan/student_id endpoint doesn't exist - student ID scanning is part of session workflow
 
+    # Test with real images if available
     if os.path.exists(test_images['exam_code']):
         with open(test_images['exam_code'], 'rb') as f:
             files = {'image': ('code.jpg', f, 'image/jpeg')}
@@ -333,27 +336,52 @@ def test_full_exam_workflow():
     """Test complete exam grading workflow with mock data"""
     print("🎯 Testing full exam grading workflow...")
 
-    # Create correct answers first
+    # Create correct answers in new 3-part format
     import time
     unique_code = f"TEST_{int(time.time())}"
-    correct_answers = [[i, "A"] for i in range(1, 41)]
-    # All answers A for testing
+
+    # P1: 40 ABCD questions
+    p1_answers = [[i, "A"] for i in range(1, 41)]
+
+    # P2: True/False with sub-parts (8 cells × 4 sub-parts = 32 answers)
+    p2_answers = []
+    for cell in range(1, 9):  # 8 cells
+        for sub in ['a', 'b', 'c', 'd']:  # 4 sub-parts each
+            if sub in ['a', 'c']:  # Alternate pattern for testing
+                answer = 'Dung'
+            else:
+                answer = 'Sai'
+            p2_answers.append([f'p2_c{cell}_{sub}', answer])
+
+    # P3: Essay with symbol marks (8 columns)
+    p3_answers = [
+        ['p3_c1', ['1', '2']], ['p3_c2', ['3', '4']],
+        ['p3_c3', ['5', '6']], ['p3_c4', ['7', '8']],
+        ['p3_c5', ['0', '1']], ['p3_c6', ['2', '3']],
+        ['p3_c7', ['4', '5']], ['p3_c8', ['6', '7']]
+    ]
+
+    # New format: dict with p1, p2, p3 keys
+    correct_answers = {
+        'p1': p1_answers,
+        'p2': p2_answers,
+        'p3': p3_answers
+    }
 
     data = {"exam_code": unique_code, "answers": correct_answers}
-    response = requests.post(f"{API_URL}/correctans/manual", json=data)
+    response = test_client.post('/correctans/manual', json=data)
     assert_response(response, 201, "Create test correct answers")
 
     # Create a test exam manually
     unique_student = f"TEST{int(time.time()) % 100000:05d}"
     exam_data = {
-        "student_id": unique_student,
         "exam_code": unique_code,
         "total_score": 8.5
     }
     response = requests.post(f"{API_URL}/exams", json=exam_data)
     assert_response(response, 201, "Create test exam")
     exam_result = response.json()
-    assert "exam" in exam_result
+    assert "exam_id" in exam_result  # Updated to match new endpoint response
 
     # Verify exam was created
     response = requests.get(f"{API_URL}/exams")
@@ -361,21 +389,37 @@ def test_full_exam_workflow():
     exams = response.json()
     assert len(exams) >= 1
 
-    # Test grading logic with mock scanned answers
+    # Test grading logic with mock scanned answers (new format)
     from services.Grade.create_ans import score_answers
-    scanned_answers = [[i, "A"] for i in range(1, 41)]  # Perfect score
-    score = score_answers(scanned_answers, correct_answers)
-    assert score == 10.0, f"Expected perfect score 10.0, got {score}"
-    print("   ✅ Grading logic: Perfect score calculation correct")
 
-    # Test partial score
-    partial_answers = ([[i, "A"] for i in range(1, 21)] +
-                       [[i, "B"] for i in range(21, 41)])
-    # Half correct
-    partial_score = score_answers(partial_answers, correct_answers)
-    assert partial_score == 5.0, (f"Expected half score 5.0, "
-                                  f"got {partial_score}")
-    print("   ✅ Grading logic: Partial score calculation correct")
+    # Perfect scores for all parts
+    scanned_answers = {
+        'p1': [[i, "A"] for i in range(1, 41)],  # Perfect P1 score
+        'p2': p2_answers,  # Perfect P2 score
+        'p3': p3_answers   # Perfect P3 score
+    }
+
+    # Test scoring with new format
+    scores = score_answers(scanned_answers, correct_answers)
+    assert scores['p1_score'] == 10.0
+    assert scores['p2_score'] == 10.0
+    assert scores['p3_score'] == 10.0
+    assert scores['total_score'] == 10.0
+    print("   ✅ Grading logic: Perfect scores calculation correct")
+
+    # Test partial P1 score
+    partial_p1_answers = ([[i, "A"] for i in range(1, 21)] +
+                          [[i, "B"] for i in range(21, 41)])
+    # Half correct for P1
+    partial_scanned = {
+        'p1': partial_p1_answers,
+        'p2': p2_answers,
+        'p3': p3_answers
+    }
+    partial_scores = score_answers(partial_scanned, correct_answers)
+    expected_half = 5.0
+    assert partial_scores['p1_score'] == expected_half
+    print("   ✅ Grading logic: Partial P1 score calculation correct")
 
     # Cleanup
     response = requests.delete(f"{API_URL}/correctans/{unique_code}")

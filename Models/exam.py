@@ -1,12 +1,12 @@
 from datetime import datetime
-
-
-
 from bson import ObjectId
 
+
 class Exam:
-    def __init__(self, student_id: str, exam_code: str, score_p1: float = 0.0, score_p2: float = 0.0, score_p3: float = 0.0, total_score: float = 0.0, created_at: datetime = None, created_by: ObjectId = None, correct_ans: ObjectId = None):
-        self.student_id = student_id
+    def __init__(self, exam_code: str, score_p1: float = 0.0,
+                 score_p2: float = 0.0, score_p3: float = 0.0,
+                 total_score: float = 0.0, created_at: datetime = None,
+                 created_by: ObjectId = None, correct_ans: ObjectId = None):
         self.exam_code = exam_code
         self.score_p1 = score_p1
         self.score_p2 = score_p2
@@ -18,7 +18,6 @@ class Exam:
 
     def to_dict(self):
         data = {
-            'student_id': self.student_id,
             'exam_code': self.exam_code,
             'score_p1': self.score_p1,
             'score_p2': self.score_p2,
