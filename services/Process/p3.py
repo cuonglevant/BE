@@ -80,15 +80,12 @@ def process_p3_answers(image_path=None, show_images=False, save_images=False):
     
     threshold = np.percentile(mean_values, 30)
     
-    # Detect marks and attempt to read symbols
+    # Detect marks - return row numbers instead of symbols
     all_answers = []
-    
-    # Row labels (symbols that might appear)
-    row_labels = ['-', ',', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
     
     for col in range(1, cols):  # Columns 1-8 for Câu 1-8
         question_id = f"p3_c{col}"
-        marked_items = []  # Store (row_num, symbol) tuples
+        marked_rows = []  # Store marked row numbers
         
         for row in range(1, rows):
             y1, y2 = row * cell_height, (row + 1) * cell_height
@@ -97,17 +94,9 @@ def process_p3_answers(image_path=None, show_images=False, save_images=False):
             mean_val = np.mean(cell)
             
             if mean_val < threshold:
-                # Try to determine the symbol based on row position
-                # Row 1-10 typically map to symbols 0-9 or special chars
-                if row <= len(row_labels):
-                    symbol = row_labels[row - 1]
-                else:
-                    symbol = str(row)
-                marked_items.append(symbol)
+                # Store the actual row number (1-based)
+                marked_rows.append(row)
         
-        if marked_items:
-            all_answers.append((question_id, marked_items))
-        else:
-            all_answers.append((question_id, []))
+        all_answers.append((question_id, marked_rows))
     
     return all_answers

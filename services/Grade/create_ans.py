@@ -124,8 +124,8 @@ def scan_all_answers(p1_img, p2_img, p3_img,
     Returns:
         dict: {
             'p1': [(1, 'A'), (2, 'B'), ...],  # 40 ABCD answers
-            'p2': [('p2_q1_a', 'Dung'), ...],  # True/False answers
-            'p3': [('p3_c1', [1,3,5]), ...]    # Essay marked rows
+            'p2': [('p2_q1_a', 'Dung'), ('p2_q2_a', 'Sai'), ...],  # True/False answers (sequential)
+            'p3': [('p3_c1', [1,3,5]), ('p3_c2', [2,4]), ...]    # Essay marked rows (row numbers)
         }
     """
     ans_p1 = process_p1_answers(p1_img, show_images, save_images)
