@@ -99,7 +99,9 @@ def process_p2_answers(image_path=None, show_images=False, save_images=False):
         
         for row in range(1, min(rows, 5)):
             sub_part = sub_parts[row - 1]
-            question_id = f"p2_c{idx + 1}_{sub_part}"
+            # Use sequential question numbering instead of cell-based
+            question_num = idx * 4 + row  # 4 sub-questions per cell
+            question_id = f"p2_q{question_num}_{sub_part}"
             
             answered = False
             for col in range(1, cols):
