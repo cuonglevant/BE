@@ -4,6 +4,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from utils import four_point_transform
+from .accuracy_improvements import AccuracyImprover
 
 
 def process_p3_answers(image_path=None, show_images=False, save_images=False):
@@ -31,6 +32,11 @@ def process_p3_answers(image_path=None, show_images=False, save_images=False):
     if image is None:
         print(f"Cannot read image: {image_path}")
         return []
+    
+    # Initialize accuracy improver
+    improver = AccuracyImprover()
+    
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -61,13 +67,16 @@ def process_p3_answers(image_path=None, show_images=False, save_images=False):
     paper_points = approx.reshape(4, 2)
     cropped_paper = four_point_transform(cv2.imread(image_path), paper_points)
     
+    # Apply enhancement to the cropped grid for better mark detection
+    cropped_paper = improver.enhance_image_quality(cropped_paper)
+    
     height, width = cropped_paper.shape[:2]
     # Grid: 8 columns (Câu 1-8), ~10 rows per column
     rows, cols = 11, 9  # 11 rows (1 header + 10 answer rows), 9 cols (1 label + 8 questions)
     cell_height, cell_width = height // rows, width // cols
     
-    gray_cropped = cv2.cvtColor(cropped_paper, cv2.COLOR_BGR2GRAY)
-    _, binary = cv2.threshold(gray_cropped, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # Apply thresholding to the enhanced grayscale image
+    _, binary = cv2.threshold(cropped_paper, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     
     # Calculate threshold - use 30th percentile
     mean_values = []
