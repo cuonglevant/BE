@@ -465,89 +465,90 @@ Response:
 
 ## 🎯 Usage Examples
 
-### Complete Exam Processing Flow
+### Tạo Exam mới với đáp án đúng
 
 ```python
 import requests
 
 API_URL = "http://localhost:5000"
 
-# 1. Start session
+# Tạo exam mới với đáp án đúng
+exam_data = {
+    "exam_code": "MATH_001",
+    "answers": [
+        [1, "A"], [2, "B"], [3, "C"], [4, "D"], [5, "A"],
+        [6, "B"], [7, "C"], [8, "D"], [9, "A"], [10, "B"],
+        # ... thêm 30 câu nữa
+    ],
+    "created_by": "teacher_id"
+}
+
+response = requests.post(f"{API_URL}/exams", json=exam_data)
+print(response.json())
+# Response: {"message": "Exam created with correct answers", "exam_code": "MATH_001", "answers_count": 40}
+```
+
+### Chấm bài học sinh
+
+```python
+import requests
+
+API_URL = "http://localhost:5000"
+
+# 1. Bắt đầu session chấm bài
 response = requests.post(f"{API_URL}/exam/session/start")
 session_id = response.json()["session_id"]
 
-# 2. Upload student ID
-with open("student_id.jpg", "rb") as f:
-    requests.post(
-        f"{API_URL}/exam/session/student_id",
-        data={"session_id": session_id},
-        files={"image": f}
-    )
-
-# 3. Upload exam code
+# 2. Upload ảnh mã đề để xác định bài thi
 with open("exam_code.jpg", "rb") as f:
-    requests.post(
+    response = requests.post(
         f"{API_URL}/exam/session/exam_code",
         data={"session_id": session_id},
         files={"image": f}
     )
+    exam_code = response.json()["exam_code"]
 
-# 4. Upload answer sheets
-for part in ["p1", "p2", "p3"]:
-    with open(f"{part}.jpg", "rb") as f:
-        requests.post(
-            f"{API_URL}/exam/session/part/{part}",
-            data={"session_id": session_id},
-            files={"image": f}
-        )
-
-# 5. Finish and get results
-result = requests.post(
-    f"{API_URL}/exam/session/finish",
-    data={"session_id": session_id}
-)
-print(result.json())
-```
-
-### Create Correct Answers
-
-```python
-import requests
-
-API_URL = "http://localhost:5000"
-
-# From images
+# 3. Upload bài làm của học sinh và chấm điểm tự động
 with open("p1.jpg", "rb") as f1, \
      open("p2.jpg", "rb") as f2, \
      open("p3.jpg", "rb") as f3:
+    
     response = requests.post(
-        f"{API_URL}/correctans",
-        data={"exam_code": "2942"},
+        f"{API_URL}/exam/session/grade",
+        data={"session_id": session_id},
         files={
             "p1_img": f1,
             "p2_img": f2,
             "p3_img": f3
         }
     )
-    print(response.json())
+    
+    result = response.json()
+    print(f"Điểm số: {result['total_score']}")
+    print(f"Số câu trả lời: {result['scanned_answers_count']}")
+```
 
-# Or manually
-correct_answers = {
-    "exam_code": "2942",
-    "answers": [[i, "A"] for i in range(1, 41)]  # Example
-}
-response = requests.post(
-    f"{API_URL}/correctans/manual",
-    json=correct_answers
-)
-print(response.json())
+### Xem danh sách bài thi
+
+```python
+import requests
+
+API_URL = "http://localhost:5000"
+
+# Xem tất cả bài thi
+response = requests.get(f"{API_URL}/exams")
+exams = response.json()
+
+# Xem bài thi theo mã đề
+response = requests.get(f"{API_URL}/exams?exam_code=MATH_001")
+filtered_exams = response.json()
 ```
 
 ---
 
 ## 🗂️ Project Structure
 
-```
+```text
 BE/
 ├── main.py                      # Main Flask application
 ├── requirements.txt             # Python dependencies
@@ -588,6 +589,7 @@ All endpoints return appropriate HTTP status codes:
 - `500` - Internal Server Error
 
 Error response format:
+
 ```json
 {
   "error": "Description of the error"
