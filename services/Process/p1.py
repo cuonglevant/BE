@@ -49,14 +49,16 @@ def process_p1_answers(image_path=None, show_images=False, save_images=False, en
         approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
         area = cv2.contourArea(contour)
         
-        if len(approx) == 4 and 150000 < area < 300000:
+        # More flexible area range to handle different image qualities
+        if len(approx) == 4 and 100000 < area < 400000:
             qualified_contours.append((contour, approx, area, i))
     
     if len(qualified_contours) < 4:
-        print(f"Warning: Found only {len(qualified_contours)} answer grids, expected 4")
+        print(f"Warning: Found only {len(qualified_contours)} answer grids, expected 4 - processing available grids")
     
-    # Sort by vertical position
-    qualified_contours.sort(key=lambda x: cv2.boundingRect(x[0])[1])
+    if not qualified_contours:
+        print("No P1 answer grids found")
+        return {'answers': [(q, '') for q in range(1, 41)], 'validation': None}
     
     all_answers = {}
     
@@ -91,19 +93,32 @@ def process_p1_answers(image_path=None, show_images=False, save_images=False, en
         col_to_answer = {1: 'A', 2: 'B', 3: 'C', 4: 'D'}
         question_offset = idx * 10  # Grid 0: Q1-10, Grid 1: Q11-20, etc.
         
+        # Debug: Check if we need to adjust column boundaries
+        # The issue might be that column boundaries are calculated incorrectly
+        # Try using slightly adjusted boundaries for better bubble detection
         for row in range(1, rows):
             question_num = question_offset + row
+            bubble_means = []  # Store mean values for all columns
+            
+            # First, calculate mean for all answer columns
             for col in range(1, cols):
-                y1, y2 = row * cell_height, (row + 1) * cell_height
-                x1, x2 = col * cell_width, (col + 1) * cell_width
+                # Add small padding to avoid edge issues
+                y1 = row * cell_height + 2
+                y2 = (row + 1) * cell_height - 2
+                x1 = col * cell_width + 2
+                x2 = (col + 1) * cell_width - 2
+                
                 cell = binary[y1:y2, x1:x2]
                 mean_val = np.mean(cell)
-                
-                # Use the calculated threshold for better sensitivity
-                if mean_val < threshold:
-                    answer = col_to_answer[col]
-                    all_answers[question_num] = answer
-                    break  # Only one answer per question
+                bubble_means.append((col, mean_val))
+            
+            # Find the darkest bubble (lowest mean value = most filled)
+            # Use threshold to determine if it's actually filled
+            darkest = min(bubble_means, key=lambda x: x[1])
+            
+            if darkest[1] < threshold:
+                answer = col_to_answer[darkest[0]]
+                all_answers[question_num] = answer
     
     # Return sorted list
     result_answers = []

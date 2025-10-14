@@ -24,20 +24,42 @@ Thumbs.db
 # Logs
 *.log
 
-# Test files
-# Ignore test scripts and outputs
-/QUICKSTART.md
-/SUMMARY.md
-test/
+# Test and validation files
+test_api.py
+test_main.py
+accuracy_tester.py
+comprehensive_validator.py
+real_exam_validator.py
+visual_bubble_debugger.py
+visual_ground_truth_creator.py
+comprehensive_system_validator.py
+debug_output/
+validation_clean/
+validation_real/
+FINAL_REAL_VALIDATION_SUMMARY.md
+REAL_EXAM_VALIDATION_REPORT.md
+QUICK_FIX_GUIDE.md
+VISUAL_COMPARISON.md
+SYSTEM_VALIDATION_FINAL_REPORT.md
+system_validation_report.json
 
-# Ignore images and temp files
+# Ignore images (except in 2912 folder for testing)
 *.jpg
 *.jpeg
 *.png
 *.bmp
+2912/*.jpg
+2912/*.jpeg
+2912/*.png
+
+# Temp files
 *.tmp
 *.bak
 *.swp
 
-# Ignore deployment configs (optional)
+# Deployment configs (optional)
 # render.yaml
+
+/omr-reference
+
+omr-reference/

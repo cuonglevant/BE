@@ -50,24 +50,12 @@ from services.Db.correctans_db_service import CorrectAnsDbService
 from services.Grade.create_ans import scan_all_answers, score_answers
 from services.Grade.scan_student_id import scan_exam_code
 
-# Redis setup (optional)
+# Redis setup (optional) - DISABLED FOR TESTING
 USE_REDIS = False
 redis_client = None
 
-try:
-    import redis
-    redis_client = redis.Redis(
-        host='localhost', port=6379, decode_responses=True
-    )
-    redis_client.ping()
-    USE_REDIS = True
-    logger.info("Redis connected successfully")
-except ImportError:
-    logger.warning("Redis library not available, using in-memory storage")
-    USE_REDIS = False
-except Exception as e:
-    logger.warning(f"Redis not available ({e}), using in-memory storage")
-    USE_REDIS = False
+# Skip Redis setup entirely for now
+logger.info("Redis disabled for testing - using in-memory storage")
 
 
 # ============================================================================
@@ -655,9 +643,100 @@ def root():
             'correctans': '/correctans',
             'grade': '/grade/*',
             'scan': '/scan/*',
-            'health': '/health'
+            'health': '/health',
+            'test': '/test/*'
         }
     })
+
+
+@app.route('/test/system', methods=['POST'])
+def run_system_test():
+    """Run comprehensive system integration test"""
+    try:
+        # Import the test functions
+        from comprehensive_system_test import (
+            load_validation_results, find_test_images,
+            test_individual_processors, test_integrated_pipeline
+        )
+
+        logger.info("Starting comprehensive system test...")
+
+        # Load validation data
+        expected_results = load_validation_results()
+
+        # Find test images
+        images = find_test_images()
+        if not images:
+            return jsonify({
+                'success': False,
+                'error': 'No test images found in 2912 directory'
+            }), 404
+
+        # Test individual processors
+        processor_results = test_individual_processors(images)
+
+        # Test integrated pipeline
+        integrated_result = test_integrated_pipeline(images, expected_results)
+
+        if not integrated_result:
+            return jsonify({
+                'success': False,
+                'error': 'Integrated pipeline test failed'
+            }), 500
+
+        # Extract validation results
+        validation = integrated_result.get('validation', {})
+
+        # Determine success criteria
+        p1_success = validation.get('p1', {}).get('accuracy', 0) >= 95.0
+        p2_success = validation.get('p2', {}).get('accuracy', 0) >= 90.0
+        p3_success = validation.get('p3', {}).get('accuracy', 0) >= 100.0
+        overall_success = p1_success and p2_success and p3_success
+
+        response = {
+            'success': overall_success,
+            'timestamp': datetime.now().isoformat(),
+            'test_results': {
+                'individual_processors': processor_results,
+                'integrated_pipeline': {
+                    'scanned_answers': integrated_result.get(
+                        'scanned_answers'),
+                    'scores': integrated_result.get('scores'),
+                    'validation': validation
+                }
+            },
+            'accuracy_summary': {
+                'p1': validation.get('p1', {}),
+                'p2': validation.get('p2', {}),
+                'p3': validation.get('p3', {}),
+                'overall': validation.get('overall', {})
+            },
+            'success_criteria': {
+                'p1_target': '>= 95%',
+                'p2_target': '>= 90%',
+                'p3_target': '>= 100%',
+                'p1_achieved': p1_success,
+                'p2_achieved': p2_success,
+                'p3_achieved': p3_success,
+                'overall_passed': overall_success
+            }
+        }
+
+        status_code = 200 if overall_success else 206  # 206 = Partial Content
+        logger.info(f"System test completed with overall success: "
+                    f"{overall_success}")
+
+        return jsonify(response), status_code
+
+    except Exception as e:
+        logger.error(f"System test failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
 
 
 # ============================================================================

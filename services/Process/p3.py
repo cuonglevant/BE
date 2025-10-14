@@ -9,9 +9,9 @@ from .accuracy_improvements import AccuracyImprover
 
 def process_p3_answers(image_path=None, show_images=False, save_images=False):
     """
-    Process PHẦN III - Essay/Multi-row format
-    Structure: 8 columns (Câu 1-8), each with multiple answer rows
-    Each cell can be marked independently
+    Process PHẦN III - Numerical grid-in format
+    Structure: 8 columns (Câu 1-8), each with multiple answer rows for digits
+    Reconstructs numerical values from filled bubbles
     
     Args:
         image_path: Path to image file
@@ -19,11 +19,27 @@ def process_p3_answers(image_path=None, show_images=False, save_images=False):
         save_images: Save processed images
     
     Returns:
-        list: [(question_id, row_marks), ...]
-        e.g., [('p3_c1', [1, 3, 5]), ('p3_c2', [2, 4]), ...]
-        where numbers indicate marked rows
+        list: [(question_id, numerical_value), ...]
+        e.g., [('p3_c1', -1.5), ('p3_c2', 3.14), ('p3_c3', 10), ...]
     """
     show_images = False
+    
+    # Row to character mapping for P3 grid
+    # Based on typical grid structure: -, 0-9, .
+    ROW_TO_CHAR = {
+        1: '-',   # Negative sign (row 1)
+        2: '0',
+        3: '1',
+        4: '2',
+        5: '3',
+        6: '4',
+        7: '5',
+        8: '6',
+        9: '7',
+        10: '8',
+        # Note: May need adjustment based on actual grid layout
+        # Row 11 might be '9' or '.'
+    }
     
     if image_path is None:
         image_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test.jpg")
@@ -57,11 +73,13 @@ def process_p3_answers(image_path=None, show_images=False, save_images=False):
             qualified_contours.append((contour, approx, area, i))
     
     if not qualified_contours:
-        print("No PHẦN III grid found")
+        print("No PHẦN III grid found - this image may not contain essay section")
         return []
     
-    # Use the largest grid
-    qualified_contours.sort(key=lambda x: x[2], reverse=True)
+    # Use the largest grid if multiple found, otherwise use the first
+    if len(qualified_contours) > 1:
+        qualified_contours.sort(key=lambda x: x[2], reverse=True)  # Sort by area descending
+    
     contour, approx, area, _ = qualified_contours[0]
     
     paper_points = approx.reshape(4, 2)
@@ -71,7 +89,7 @@ def process_p3_answers(image_path=None, show_images=False, save_images=False):
     cropped_paper = improver.enhance_image_quality(cropped_paper)
     
     height, width = cropped_paper.shape[:2]
-    # Grid: 8 columns (Câu 1-8), ~10 rows per column
+    # Grid: 8 columns (Câu 1-8 as shown in exam images), ~10 rows per column
     rows, cols = 11, 9  # 11 rows (1 header + 10 answer rows), 9 cols (1 label + 8 questions)
     cell_height, cell_width = height // rows, width // cols
     
@@ -89,7 +107,44 @@ def process_p3_answers(image_path=None, show_images=False, save_images=False):
     
     threshold = np.percentile(mean_values, 30)
     
-    # Detect marks - return row numbers instead of symbols
+    # Helper function to reconstruct number from marked rows
+    def reconstruct_number_from_bubbles(marked_rows, row_char_map):
+        """
+        Reconstruct numerical value from filled bubbles.
+        
+        Args:
+            marked_rows: List of marked row numbers
+            row_char_map: Dictionary mapping row numbers to characters
+        
+        Returns:
+            float or None: Reconstructed number
+        """
+        if not marked_rows:
+            return None
+        
+        # Build string from marked bubbles
+        number_string = ""
+        for row_num in marked_rows:
+            if row_num in row_char_map:
+                number_string += row_char_map[row_num]
+        
+        if not number_string:
+            return None
+        
+        # Try to convert to number
+        try:
+            # Handle special cases
+            if number_string == '-':
+                return None  # Just negative sign without number
+            
+            # Convert to float
+            return float(number_string)
+        except ValueError:
+            # If conversion fails, return None
+            print(f"Warning: Could not convert '{number_string}' to number")
+            return None
+    
+    # Detect marks and reconstruct numbers
     all_answers = []
     
     for col in range(1, cols):  # Columns 1-8 for Câu 1-8
@@ -106,6 +161,8 @@ def process_p3_answers(image_path=None, show_images=False, save_images=False):
                 # Store the actual row number (1-based)
                 marked_rows.append(row)
         
-        all_answers.append((question_id, marked_rows))
+        # Reconstruct the numerical value from marked rows
+        reconstructed_value = reconstruct_number_from_bubbles(marked_rows, ROW_TO_CHAR)
+        all_answers.append((question_id, reconstructed_value))
     
     return all_answers

@@ -1,8 +1,7 @@
 from services.Process.ec import process_exam_code
-
-from services.Process.p1 import process_p1_answers
-from services.Process.p2 import process_p2_answers
-from services.Process.p3 import process_p3_answers
+from services.Process.balanced_grid_omr import BalancedGridOMR
+from services.Process.balanced_grid_p2 import BalancedGridP2
+from services.Process.balanced_grid_p3 import BalancedGridP3
 
 def scan_student_id(image_path=None, show_images=False, save_images=False):
     """
@@ -18,13 +17,24 @@ def scan_exam_code(image_path=None, show_images=False, save_images=False):
 
 
 def scan_p1(image_path=None, show_images=False, save_images=False):
-    return process_p1_answers(image_path, show_images, save_images)
+    omr = BalancedGridOMR()
+    res = omr.process_part1(image_path)
+    return [(a.get('question'), a.get('answer')) for a in (res.get('answers') or [])]
 
 
 def scan_p2(image_path=None, show_images=False, save_images=False):
-    return process_p2_answers(image_path, show_images, save_images)
+    p2 = BalancedGridP2()
+    res = p2.process_part2(image_path)
+    out = []
+    for item in (res.get('answers') or []):
+        q = item.get('question')
+        for k, v in (item.get('answers') or {}).items():
+            out.append((f"q{q}_{k}", bool(v)))
+    return out
 
 
 def scan_p3(image_path=None, show_images=False, save_images=False):
-    return process_p3_answers(image_path, show_images, save_images)
+    p3 = BalancedGridP3(debug_mode=False)
+    res = p3.process_part3(image_path)
+    return [(a.get('question'), a.get('answer')) for a in (res.get('answers') or [])]
 

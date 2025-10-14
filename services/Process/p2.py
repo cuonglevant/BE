@@ -9,19 +9,17 @@ from .accuracy_improvements import AccuracyImprover
 
 def process_p2_answers(image_path=None, show_images=False, save_images=False):
     """
-    Process PHẦN II from complete answer sheet
+    Process PHẦN II - Multiple True/False format
     
-    From image structure: 8 cells arranged in 2 rows x 4 columns
-    Each cell has:
-      - Label (Câu X)
-      - Two columns: "Đúng Sai" with sub-parts a, b, c, d
+    Each question has 4 sub-statements (a, b, c, d)
+    Each sub-statement can be marked as True (Đúng) or False (Sai)
     
     Args:
         image_path: Path to image file
     
     Returns:
-        list: [(question_id, answer), ...]
-        e.g., [('p2_c1_a', 'Dung'), ('p2_c1_b', 'Sai'), ...]
+        list: [(question_id, answer_dict), ...]
+        e.g., [('q1', {'a': True, 'b': False, 'c': True, 'd': False}), ...]
     """
     show_images = False
     
@@ -37,8 +35,6 @@ def process_p2_answers(image_path=None, show_images=False, save_images=False):
     improver = AccuracyImprover()
     
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     edged = cv2.Canny(blurred, 75, 200)
     
@@ -46,19 +42,23 @@ def process_p2_answers(image_path=None, show_images=False, save_images=False):
     contours = sorted(contours, key=cv2.contourArea, reverse=True)
     
     # Find grids - P2 cells are mid-sized (around 130k-135k area)
+    # P2 has 8 cells total arranged in 2 rows x 4 columns
     qualified_contours = []
     for i, contour in enumerate(contours):
         perimeter = cv2.arcLength(contour, True)
         approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
         area = cv2.contourArea(contour)
         
-        # Target P2 cell size
-        if len(approx) == 4 and 120000 < area < 145000:
+        # Target P2 cell size - adjusted range to catch all 8 cells
+        if len(approx) == 4 and 115000 < area < 150000:
             qualified_contours.append((contour, approx, area, i))
     
     if not qualified_contours:
-        print("No PHẦN II cells found")
+        print("No PHẦN II cells found - this image may not contain true/false section")
         return []
+    
+    if len(qualified_contours) < 8:
+        print(f"Warning: Found only {len(qualified_contours)} P2 cells, expected 8 - processing available cells")
     
     # Sort by position (top to bottom, left to right)
     def sort_by_position(contours_list):
@@ -84,7 +84,8 @@ def process_p2_answers(image_path=None, show_images=False, save_images=False):
         cropped_paper = improver.enhance_image_quality(cropped_paper)
         
         height, width = cropped_paper.shape[:2]
-        # Structure: 5 rows (header + 4 sub-parts), 3 cols (label + Đúng + Sai)
+        # Structure: Each cell has 4 sub-questions (a,b,c,d) with Đúng/Sai columns
+        # Layout: 5 rows (1 header + 4 sub-questions), 3 cols (label + Đúng + Sai)
         rows, cols = 5, 3
         cell_height, cell_width = height // rows, width // cols
         
@@ -93,8 +94,8 @@ def process_p2_answers(image_path=None, show_images=False, save_images=False):
         
         # Calculate threshold - use 30th percentile for better detection
         mean_values = []
-        for col in range(1, cols):
-            for row in range(1, rows):
+        for row in range(1, rows):  # Skip header row
+            for col in range(1, cols):  # Skip label column
                 y1, y2 = row * cell_height, (row + 1) * cell_height
                 x1, x2 = col * cell_width, (col + 1) * cell_width
                 cell = binary[y1:y2, x1:x2]
@@ -102,31 +103,37 @@ def process_p2_answers(image_path=None, show_images=False, save_images=False):
         
         threshold = np.percentile(mean_values, 30)
         
-        # Detect marks
-        col_to_answer = {1: 'Dung', 2: 'Sai'}
-        sub_parts = ['a', 'b', 'c', 'd']
+        # Process each sub-question (a, b, c, d)
+        question_num = idx + 1
+        question_id = f"q{question_num}"
+        sub_answers = {}
         
-        for row in range(1, min(rows, 5)):
-            sub_part = sub_parts[row - 1]
-            # Use sequential question numbering instead of cell-based
-            question_num = idx * 4 + row  # 4 sub-questions per cell
-            question_id = f"p2_q{question_num}_{sub_part}"
+        sub_question_labels = ['a', 'b', 'c', 'd']
+        
+        for row_idx in range(1, rows):  # Rows 1-4 for a,b,c,d
+            sub_label = sub_question_labels[row_idx - 1]
             
-            answered = False
-            for col in range(1, cols):
-                y1, y2 = row * cell_height, (row + 1) * cell_height
-                x1, x2 = col * cell_width, (col + 1) * cell_width
-                cell = binary[y1:y2, x1:x2]
-                mean_val = np.mean(cell)
-                
-                if mean_val < threshold:
-                    answer = col_to_answer[col]
-                    all_answers.append((question_id, answer))
-                    answered = True
-                    break
+            y1, y2 = row_idx * cell_height, (row_idx + 1) * cell_height
             
-            # Add empty entry if not answered
-            if not answered:
-                all_answers.append((question_id, ''))
+            # Check Đúng column (col 1)
+            x1_dung, x2_dung = 1 * cell_width, 2 * cell_width
+            dung_cell = binary[y1:y2, x1_dung:x2_dung]
+            dung_mean = np.mean(dung_cell)
+            
+            # Check Sai column (col 2)
+            x1_sai, x2_sai = 2 * cell_width, 3 * cell_width
+            sai_cell = binary[y1:y2, x1_sai:x2_sai]
+            sai_mean = np.mean(sai_cell)
+            
+            # Determine answer based on which bubble is darker (more filled)
+            if dung_mean < threshold and dung_mean < sai_mean:
+                sub_answers[sub_label] = True
+            elif sai_mean < threshold and sai_mean < dung_mean:
+                sub_answers[sub_label] = False
+            else:
+                # If neither or both are marked, default to None or False
+                sub_answers[sub_label] = False
+        
+        all_answers.append((question_id, sub_answers))
     
     return all_answers
